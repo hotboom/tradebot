@@ -1,0 +1,27 @@
+{
+  "name": "executor-service",
+  "version": "0.1.0",
+  "description": "Executor-бот для торговли по сигналам ликвидаций (MVP)",
+  "main": "dist/server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "pm2:start": "pm2 start ecosystem.config.js"
+  },
+  "dependencies": {
+    "bybit-api": "^4.6.4",
+    "dotenv": "^17.4.2",
+    "fastify": "^5.10.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "tsx": "^4.23.0",
+    "typescript": "^6.0.3"
+  }
+}

@@ -1,0 +1,73 @@
+import "dotenv/config";
+import Fastify, { type FastifyError } from "fastify";
+import { loadConfig } from "./config";
+import { cascadeSignalSchema } from "./schema/cascadeSignal";
+import { checkThreshold } from "./decision/filters";
+import { BybitClient } from "./bybit/client";
+import { SignalsLogger } from "./logging/signalsLogger";
+import { OrdersLogger } from "./logging/ordersLogger";
+import { OrderExecutor } from "./executor";
+import { DedupStore } from "./dedupStore";
+import path from "node:path";
+
+async function main(): Promise<void> {
+  const config = loadConfig();
+
+  const signalsLogger = new SignalsLogger(config.logging.signalsLogPath);
+  const ordersLogger = new OrdersLogger(config.logging.ordersLogPath);
+  const dedupStore = new DedupStore(
+    path.join(path.dirname(path.resolve(config.logging.signalsLogPath)), "processed_signals.log")
+  );
+
+  const bybitClient = new BybitClient(config.bybit.testnet);
+  const executor = new OrderExecutor(config, bybitClient, ordersLogger);
+
+  const app = Fastify({ logger: true });
+
+  app.post("/signal/liquidation", async (request, reply) => {
+    const parsed = cascadeSignalSchema.safeParse(request.body);
+    if (!parsed.success) {
+      const body = typeof request.body === "object" && request.body !== null ? request.body : null;
+      signalsLogger.log(body as never, "rejected", "invalid_schema");
+      return reply.code(400).send({ decision: "rejected", reason: "invalid_schema" });
+    }
+    const signal = parsed.data;
+
+    const filter = checkThreshold(signal, config.trading.minLiquidationUsdt);
+    if (!filter.accepted) {
+      signalsLogger.log(signal, "rejected", filter.reason);
+      return reply.code(200).send({ decision: "rejected", reason: filter.reason });
+    }
+
+    signalsLogger.log(signal, "accepted", null);
+
+    // Идемпотентность: повторный сигнал (symbol + timestamp) не создаёт новый ордер
+    const dedupKey = DedupStore.key(signal.symbol, signal.timestamp);
+    if (dedupStore.has(dedupKey)) {
+      return reply.code(200).send({ decision: "accepted", duplicate: true });
+    }
+    dedupStore.add(dedupKey);
+
+    // Исполнение асинхронно, ошибки логируются внутри executor'а
+    void executor.execute(signal);
+
+    return reply.code(200).send({ decision: "accepted", duplicate: false });
+  });
+
+  // Некорректный JSON в теле запроса → 400 + запись в signals.log
+  app.setErrorHandler((error: FastifyError, _request, reply) => {
+    if (error.statusCode === 400) {
+      signalsLogger.log(null, "rejected", "invalid_schema");
+      return reply.code(400).send({ decision: "rejected", reason: "invalid_schema" });
+    }
+    app.log.error(error);
+    return reply.code(500).send({ error: "internal_error" });
+  });
+
+  await app.listen({ host: config.server.host, port: config.server.port });
+}
+
+main().catch((err) => {
+  console.error("Fatal startup error:", err);
+  process.exit(1);
+});

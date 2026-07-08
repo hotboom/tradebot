@@ -1,0 +1,19 @@
+{
+  "server": {
+    "port": 4001,
+    "host": "127.0.0.1"
+  },
+  "bybit": {
+    "testnet": false
+  },
+  "trading": {
+    "minLiquidationUsdt": 1000000,
+    "positionSizeUsdt": 10,
+    "stopLossPercent": 1.5,
+    "takeProfitPercent": null
+  },
+  "logging": {
+    "signalsLogPath": "./logs/signals.log",
+    "ordersLogPath": "./logs/orders.log"
+  }
+}

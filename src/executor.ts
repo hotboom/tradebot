@@ -28,20 +28,17 @@ export class OrderExecutor {
   /** Исполнение принятого сигнала. Ошибки логируются, наружу не бросаются. */
   async execute(signal: CascadeSignal): Promise<void> {
     const side: OrderSide = resolveOrderSide(signal.direction);
-    // Ориентировочная цена входа для расчёта qty и SL/TP (MVP)
-    let entryPriceRef = signal.lastBankruptcyPrice;
+    // Цену входа не запрашиваем отдельно (getLastPrice убран из критического пути):
+    // qty и SL/TP считаем от lastBankruptcyPrice из сигнала (MVP, проскальзывание допустимо).
+    const entryPriceRef = signal.lastBankruptcyPrice;
     let qty: number | null = null;
     let sl: number | null = null;
     let tp: number | null = null;
+    let orderId: string | null = null;
 
+    // Шаг 1 (критический путь): максимально быстрый вход маркет-ордером без SL/TP.
     try {
       const instrument = await this.client.getInstrumentInfo(signal.symbol);
-
-      try {
-        entryPriceRef = await this.client.getLastPrice(signal.symbol);
-      } catch {
-        // тикер недоступен — остаёмся на lastBankruptcyPrice из сигнала
-      }
 
       const rawQty = this.config.trading.positionSizeUsdt / entryPriceRef;
       qty = roundDownToStep(rawQty, instrument.qtyStep);
@@ -49,28 +46,36 @@ export class OrderExecutor {
         qty = instrument.minOrderQty;
       }
 
+      orderId = await this.client.submitMarketOrder({
+        symbol: signal.symbol,
+        side,
+        qty,
+      });
+
+      // Реальную цену входа берём из позиции (ответ submitOrder её не содержит).
+      // Если позиция ещё не отразилась — откатываемся на lastBankruptcyPrice.
+      let fillPrice = entryPriceRef;
+      try {
+        fillPrice = await this.client.getPositionAvgPrice(signal.symbol);
+      } catch {
+        // avgPrice недоступен — считаем SL/TP от lastBankruptcyPrice
+      }
+
+      // SL/TP считаем после входа от фактической цены исполнения — не задерживает вход.
       const exits = calcExitPrices(
         side,
-        entryPriceRef,
+        fillPrice,
         this.config.trading.stopLossPercent,
         this.config.trading.takeProfitPercent
       );
       sl = exits.stopLoss !== null ? roundToTick(exits.stopLoss, instrument.tickSize) : null;
       tp = exits.takeProfit !== null ? roundToTick(exits.takeProfit, instrument.tickSize) : null;
 
-      const orderId = await this.client.submitMarketOrder({
-        symbol: signal.symbol,
-        side,
-        qty,
-        stopLoss: sl,
-        takeProfit: tp,
-      });
-
       this.ordersLogger.log({
         symbol: signal.symbol,
         side,
         qty,
-        entryPriceRef,
+        entryPriceRef: fillPrice,
         sl,
         tp,
         status: "filled",
@@ -89,6 +94,30 @@ export class OrderExecutor {
         bybitOrderId: null,
         error: err instanceof Error ? err.message : String(err),
       });
+      return;
+    }
+
+    // Шаг 2 (вне критического пути): выставляем SL/TP на открытую позицию отдельным запросом.
+    if (sl !== null || tp !== null) {
+      try {
+        await this.client.setTradingStop({
+          symbol: signal.symbol,
+          stopLoss: sl,
+          takeProfit: tp,
+        });
+      } catch (err) {
+        this.ordersLogger.log({
+          symbol: signal.symbol,
+          side,
+          qty,
+          entryPriceRef,
+          sl,
+          tp,
+          status: "failed",
+          bybitOrderId: orderId,
+          error: `SL/TP not set: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
     }
   }
 }

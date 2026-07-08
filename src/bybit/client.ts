@@ -11,8 +11,14 @@ export interface MarketOrderParams {
   symbol: string;
   side: OrderSide;
   qty: number;
-  stopLoss: number | null;
-  takeProfit: number | null;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+}
+
+export interface TradingStopParams {
+  symbol: string;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
 }
 
 export class BybitClient {
@@ -72,6 +78,19 @@ export class BybitClient {
     return price;
   }
 
+  /** Фактическая средняя цена входа по открытой позиции (после исполнения маркет-ордера). */
+  async getPositionAvgPrice(symbol: string): Promise<number> {
+    const res = await this.rest.getPositionInfo({ category: "linear", symbol });
+    if (res.retCode !== 0) {
+      throw new Error(`getPositionInfo failed: ${res.retCode} ${res.retMsg}`);
+    }
+    const price = Number(res.result.list?.[0]?.avgPrice);
+    if (!Number.isFinite(price) || price <= 0) {
+      throw new Error(`No valid avgPrice for ${symbol}`);
+    }
+    return price;
+  }
+
   /** Отправка маркет-ордера. Возвращает orderId. */
   async submitMarketOrder(params: MarketOrderParams): Promise<string> {
     const order: Record<string, string> = {
@@ -81,13 +100,31 @@ export class BybitClient {
       orderType: "Market",
       qty: String(params.qty),
     };
-    if (params.stopLoss !== null) order.stopLoss = String(params.stopLoss);
-    if (params.takeProfit !== null) order.takeProfit = String(params.takeProfit);
+    if (params.stopLoss != null) order.stopLoss = String(params.stopLoss);
+    if (params.takeProfit != null) order.takeProfit = String(params.takeProfit);
 
     const res = await this.rest.submitOrder(order as never);
     if (res.retCode !== 0) {
       throw new Error(`submitOrder failed: ${res.retCode} ${res.retMsg}`);
     }
     return res.result.orderId;
+  }
+
+  /** Выставление SL/TP на уже открытую позицию (отдельным запросом после входа). */
+  async setTradingStop(params: TradingStopParams): Promise<void> {
+    const body: Record<string, string | number> = {
+      category: "linear",
+      symbol: params.symbol,
+      // one-way mode: единственная позиция по символу
+      positionIdx: 0,
+      tpslMode: "Full",
+    };
+    if (params.stopLoss != null) body.stopLoss = String(params.stopLoss);
+    if (params.takeProfit != null) body.takeProfit = String(params.takeProfit);
+
+    const res = await this.rest.setTradingStop(body as never);
+    if (res.retCode !== 0) {
+      throw new Error(`setTradingStop failed: ${res.retCode} ${res.retMsg}`);
+    }
   }
 }

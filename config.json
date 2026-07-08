@@ -7,8 +7,8 @@
     "testnet": false
   },
   "trading": {
-    "minLiquidationUsdt": 1000000,
-    "positionSizeUsdt": 10,
+    "minLiquidationUsdt": 5000000,
+    "positionSizeUsdt": 1000,
     "stopLossPercent": 1.5,
     "takeProfitPercent": null
   },

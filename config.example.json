@@ -4,7 +4,7 @@
     "host": "127.0.0.1"
   },
   "bybit": {
-    "testnet": false
+    "testnet": true
   },
   "trading": {
     "minLiquidationUsdt": 5000000,

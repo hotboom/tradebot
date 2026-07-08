@@ -7,10 +7,11 @@
 
 ```bash
 npm install
-cp .env.example .env   # прописать BYBIT_API_KEY / BYBIT_API_SECRET
+cp .env.example .env      # прописать BYBIT_API_KEY / BYBIT_API_SECRET
+cp config.example.json config.json   # порт, testnet, порог, размер позиции, SL/TP
 ```
 
-Настройки — в `config.json` (порт, testnet, порог, размер позиции, SL/TP, пути логов).
+Настройки — в `config.json` (не в git; шаблон — `config.example.json`).
 Плечо сервис не выставляет — используется то, что уже задано на аккаунте Bybit для символа.
 
 ## Запуск
@@ -45,6 +46,7 @@ cp .env.example .env
 # прописать BYBIT_API_KEY / BYBIT_API_SECRET
 
 # порт, testnet: false, пороги, размер позиции, SL/TP
+cp config.example.json config.json
 nano config.json
 
 npm run build
@@ -70,7 +72,8 @@ npm run build        # обязательно — dist/ не в репозито
 pm2 restart executor-service
 ```
 
-`.env` pull не трогает (не в git). `config.json` — в репозитории
+`.env` и `config.json` pull не трогает (не в git). После pull достаточно `npm install` + `npm run build` + `pm2 restart`.
+Если в репозитории появились новые поля конфига — сверить с `config.example.json` и дописать в локальный `config.json` вручную.
 
 
 ## API

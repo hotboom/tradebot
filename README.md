@@ -22,11 +22,56 @@ npm run dev
 # сборка + запуск
 npm run build
 npm start
-
-# через PM2 (на VPS)
-npm run build
-pm2 start ecosystem.config.js
 ```
+
+На проде одного `npm install` недостаточно — нужна сборка (`dist/` не хранится в git) и
+запуск через **PM2**, чтобы процесс жил в фоне и перезапускался при падении.
+
+## Деплой на VPS (прод)
+
+### Первый раз на сервере
+
+```bash
+# Node.js 20+
+node -v
+
+git clone <ваш-репо> tradebot
+cd tradebot
+
+npm install
+
+# .env в git нет — создать вручную на сервере
+cp .env.example .env
+# прописать BYBIT_API_KEY / BYBIT_API_SECRET
+
+# порт, testnet: false, пороги, размер позиции, SL/TP
+nano config.json
+
+npm run build
+
+npm install -g pm2
+pm2 start ecosystem.config.js
+
+# автозапуск после перезагрузки VPS
+pm2 save
+pm2 startup   # выполнить команду, которую выведет pm2
+```
+
+Сервис слушает `127.0.0.1:4001` — снаружи не виден. Сигналы шлёт другой процесс
+на том же VPS (сканер ликвидаций и т.п.) через HTTP на localhost.
+
+### После каждого `git pull`
+
+```bash
+cd tradebot
+git pull
+npm install          # если менялись зависимости
+npm run build        # обязательно — dist/ не в репозитории
+pm2 restart executor-service
+```
+
+`.env` pull не трогает (не в git). `config.json` — в репозитории
+
 
 ## API
 

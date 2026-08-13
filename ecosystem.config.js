@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "executor-service",
+      name: "executor-service-2",
       script: "dist/server.js",
       cwd: __dirname,
       instances: 1,

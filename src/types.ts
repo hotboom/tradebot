@@ -11,7 +11,7 @@ export interface CascadeSignal {
 export type OrderSide = "Buy" | "Sell";
 
 export type SignalDecision = "accepted" | "rejected";
-export type SignalRejectReason = "invalid_schema" | "below_threshold";
+export type SignalRejectReason = "invalid_schema" | "below_threshold" | "hourly_limit";
 
 export interface SignalLogEntry {
   ts: number;

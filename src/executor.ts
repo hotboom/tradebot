@@ -102,6 +102,7 @@ export class OrderExecutor {
       try {
         await this.client.setTradingStop({
           symbol: signal.symbol,
+          qty: qty as number,
           stopLoss: sl,
           takeProfit: tp,
         });

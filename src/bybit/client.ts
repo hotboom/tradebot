@@ -17,6 +17,7 @@ export interface MarketOrderParams {
 
 export interface TradingStopParams {
   symbol: string;
+  qty: number;
   stopLoss?: number | null;
   takeProfit?: number | null;
 }
@@ -110,17 +111,28 @@ export class BybitClient {
     return res.result.orderId;
   }
 
-  /** Выставление SL/TP на уже открытую позицию (отдельным запросом после входа). */
+  /** Выставление SL/TP на уже открытую позицию (отдельным запросом после входа).
+   * SL — Market (гарантированное исполнение при резком движении), TP — Limit
+   * (меньше комиссия и без проскальзывания, ценой риска не исполниться на "фитиле"). */
   async setTradingStop(params: TradingStopParams): Promise<void> {
     const body: Record<string, string | number> = {
       category: "linear",
       symbol: params.symbol,
       // one-way mode: единственная позиция по символу
       positionIdx: 0,
-      tpslMode: "Full",
+      tpslMode: "Partial",
     };
-    if (params.stopLoss != null) body.stopLoss = String(params.stopLoss);
-    if (params.takeProfit != null) body.takeProfit = String(params.takeProfit);
+    if (params.stopLoss != null) {
+      body.stopLoss = String(params.stopLoss);
+      body.slSize = String(params.qty);
+      body.slOrderType = "Market";
+    }
+    if (params.takeProfit != null) {
+      body.takeProfit = String(params.takeProfit);
+      body.tpSize = String(params.qty);
+      body.tpOrderType = "Limit";
+      body.tpLimitPrice = String(params.takeProfit);
+    }
 
     const res = await this.rest.setTradingStop(body as never);
     if (res.retCode !== 0) {

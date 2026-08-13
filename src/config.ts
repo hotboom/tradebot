@@ -15,6 +15,7 @@ const configSchema = z.object({
     positionSizeUsdt: z.number().positive(),
     stopLossPercent: z.number().positive().nullish().transform((v) => v ?? null),
     takeProfitPercent: z.number().positive().nullish().transform((v) => v ?? null),
+    maxPositionsPerHour: z.number().int().positive(),
   }),
   logging: z.object({
     signalsLogPath: z.string().min(1),

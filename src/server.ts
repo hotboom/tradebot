@@ -8,6 +8,7 @@ import { SignalsLogger } from "./logging/signalsLogger";
 import { OrdersLogger } from "./logging/ordersLogger";
 import { OrderExecutor } from "./executor";
 import { DedupStore } from "./dedupStore";
+import { PositionRateLimiter } from "./positionRateLimiter";
 import path from "node:path";
 
 async function main(): Promise<void> {
@@ -18,6 +19,7 @@ async function main(): Promise<void> {
   const dedupStore = new DedupStore(
     path.join(path.dirname(path.resolve(config.logging.signalsLogPath)), "processed_signals.log")
   );
+  const positionLimiter = new PositionRateLimiter(config.trading.maxPositionsPerHour);
 
   const bybitClient = new BybitClient(config.bybit.testnet);
   const executor = new OrderExecutor(config, bybitClient, ordersLogger);
@@ -39,6 +41,12 @@ async function main(): Promise<void> {
       return reply.code(200).send({ decision: "rejected", reason: filter.reason });
     }
 
+    // Защита от лавины сигналов при обвале рынка: не более N новых позиций в скользящий час
+    if (!positionLimiter.canOpen(Date.now())) {
+      signalsLogger.log(signal, "rejected", "hourly_limit");
+      return reply.code(200).send({ decision: "rejected", reason: "hourly_limit" });
+    }
+
     signalsLogger.log(signal, "accepted", null);
 
     // Идемпотентность: повторный сигнал (symbol + timestamp) не создаёт новый ордер
@@ -47,6 +55,8 @@ async function main(): Promise<void> {
       return reply.code(200).send({ decision: "accepted", duplicate: true });
     }
     dedupStore.add(dedupKey);
+
+    positionLimiter.recordOpen(Date.now());
 
     // Исполнение асинхронно, ошибки логируются внутри executor'а
     void executor.execute(signal);

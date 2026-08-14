@@ -9,9 +9,12 @@ import { OrdersLogger } from "./logging/ordersLogger";
 import { OrderExecutor } from "./executor";
 import { DedupStore } from "./dedupStore";
 import { PositionRateLimiter } from "./positionRateLimiter";
+import { startAdminServerIfEnabled } from "./admin/index";
 import path from "node:path";
 
 async function main(): Promise<void> {
+  startAdminServerIfEnabled();
+
   const config = loadConfig();
 
   const signalsLogger = new SignalsLogger(config.logging.signalsLogPath);

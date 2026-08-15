@@ -10,6 +10,7 @@ import { OrderExecutor } from "./executor";
 import { DedupStore } from "./dedupStore";
 import { PositionRateLimiter } from "./positionRateLimiter";
 import { startAdminServerIfEnabled } from "./admin/index";
+import { isTradingPaused } from "./tradingState";
 import path from "node:path";
 
 async function main(): Promise<void> {
@@ -37,6 +38,12 @@ async function main(): Promise<void> {
       return reply.code(400).send({ decision: "rejected", reason: "invalid_schema" });
     }
     const signal = parsed.data;
+
+    // Стоп из админки: сигналы продолжают приниматься и логироваться, но новые сделки не открываются.
+    if (isTradingPaused()) {
+      signalsLogger.log(signal, "rejected", "trading_paused");
+      return reply.code(200).send({ decision: "rejected", reason: "trading_paused" });
+    }
 
     const filter = checkThreshold(signal, config.trading.minLiquidationUsdt);
     if (!filter.accepted) {

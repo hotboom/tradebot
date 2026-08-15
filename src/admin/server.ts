@@ -8,12 +8,13 @@ import {
   type AdminCredentials
 } from "./auth";
 import { loadEnv, saveEnv, type EnvFormValues } from "./config-store";
+import { isTradingPaused, setTradingPaused } from "../tradingState";
 import { renderLoginPage, renderRestartingPage, renderSettingsPage, type Notice } from "./views";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
 type AdminRoute = {
-  section: "" | "settings" | "restart" | "restarting" | "health" | "login" | "logout";
+  section: "" | "settings" | "restart" | "restarting" | "health" | "login" | "logout" | "trading";
 };
 
 function setSecurityHeaders(res: ServerResponse, contentType = "text/html; charset=utf-8"): void {
@@ -98,7 +99,8 @@ function parseAdminRoute(pathname: string): AdminRoute | null {
       section !== "restarting" &&
       section !== "health" &&
       section !== "login" &&
-      section !== "logout")
+      section !== "logout" &&
+      section !== "trading")
   ) {
     return null;
   }
@@ -109,6 +111,14 @@ function parseAdminRoute(pathname: string): AdminRoute | null {
 function successNotice(url: URL): Notice | undefined {
   if (url.searchParams.get("restarted") === "1") {
     return { type: "success", message: "Bot restarted." };
+  }
+
+  if (url.searchParams.get("trading") === "stopped") {
+    return { type: "success", message: "Trading stopped. New signals will be rejected until you resume." };
+  }
+
+  if (url.searchParams.get("trading") === "resumed") {
+    return { type: "success", message: "Trading resumed." };
   }
 
   if (url.searchParams.get("saved") !== "1") {
@@ -186,13 +196,13 @@ async function handleGet(res: ServerResponse, url: URL, route: AdminRoute): Prom
   }
 
   if (route.section === "settings") {
-    send(res, 200, renderSettingsPage(await loadEnv(), successNotice(url)));
+    send(res, 200, renderSettingsPage(await loadEnv(), successNotice(url), isTradingPaused()));
     return;
   }
 
   if (route.section === "restarting") {
     const notice = url.searchParams.get("notice") ?? "";
-    send(res, 200, renderRestartingPage(notice));
+    send(res, 200, renderRestartingPage(notice, isTradingPaused()));
     return;
   }
 
@@ -205,8 +215,21 @@ async function handleGet(res: ServerResponse, url: URL, route: AdminRoute): Prom
 }
 
 async function handlePost(req: IncomingMessage, res: ServerResponse, route: AdminRoute): Promise<void> {
-  if (route.section !== "settings" && route.section !== "restart") {
+  if (route.section !== "settings" && route.section !== "restart" && route.section !== "trading") {
     send(res, 404, "Not found", "text/plain; charset=utf-8");
+    return;
+  }
+
+  if (route.section === "trading") {
+    const form = await readForm(req);
+    const action = form.get("action");
+    if (action !== "stop" && action !== "resume") {
+      send(res, 400, "Invalid action", "text/plain; charset=utf-8");
+      return;
+    }
+    setTradingPaused(action === "stop");
+    console.warn(`admin ${action === "stop" ? "stopped" : "resumed"} trading`);
+    redirect(res, `/admin/settings?trading=${action === "stop" ? "stopped" : "resumed"}`);
     return;
   }
 
@@ -297,7 +320,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, credenti
       return;
     }
     const notice: Notice = { type: "danger", message };
-    send(res, 400, renderSettingsPage(await loadEnv(), notice));
+    send(res, 400, renderSettingsPage(await loadEnv(), notice, isTradingPaused()));
   }
 }
 

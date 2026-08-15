@@ -64,13 +64,23 @@ export function renderLoginPage(notice?: Notice): string {
 </html>`;
 }
 
-function layout(title: string, body: string, notice?: Notice): string {
+function layout(title: string, body: string, notice?: Notice, tradingPaused = false): string {
   const noticeHtml = notice
     ? `<div class="alert alert-${notice.type} alert-dismissible fade show" role="alert">
         ${escapeHtml(notice.message)}
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
       </div>`
     : "";
+
+  const tradingBadge = tradingPaused
+    ? `<span class="badge text-bg-warning">Trading stopped</span>`
+    : `<span class="badge text-bg-success">Trading running</span>`;
+  const tradingAction = tradingPaused ? "resume" : "stop";
+  const tradingButtonClass = tradingPaused ? "btn-success" : "btn-danger";
+  const tradingButtonLabel = tradingPaused ? "Resume" : "Stop";
+  const tradingConfirm = tradingPaused
+    ? ""
+    : ` onsubmit="return confirm('Stop opening new trades? The bot and admin keep running, no new positions will be opened until you resume.');"`;
 
   return `<!doctype html>
 <html lang="en">
@@ -82,6 +92,15 @@ function layout(title: string, body: string, notice?: Notice): string {
     <div class="container">
       <a class="navbar-brand" href="/admin/settings">Executor</a>
       <ul class="navbar-nav ms-auto flex-row align-items-center gap-2">
+        <li class="nav-item">
+          ${tradingBadge}
+        </li>
+        <li class="nav-item">
+          <form method="post" action="/admin/trading" class="d-inline"${tradingConfirm}>
+            <input type="hidden" name="action" value="${tradingAction}">
+            <button class="btn btn-sm ${tradingButtonClass}" type="submit">${tradingButtonLabel}</button>
+          </form>
+        </li>
         <li class="nav-item">
           <form method="post" action="/admin/logout" class="d-inline">
             <button class="btn btn-outline-light btn-sm" type="submit">Sign out</button>
@@ -99,7 +118,7 @@ function layout(title: string, body: string, notice?: Notice): string {
 </html>`;
 }
 
-export function renderRestartingPage(noticeKind: string): string {
+export function renderRestartingPage(noticeKind: string, tradingPaused = false): string {
   const noticeParam = noticeKind ? `${encodeURIComponent(noticeKind)}=1` : "";
   const returnUrl = `/admin/settings${noticeParam ? `?${noticeParam}` : ""}`;
   const restartUrl = `/admin/restart`;
@@ -142,10 +161,10 @@ export function renderRestartingPage(noticeKind: string): string {
 })();
 </script>`;
 
-  return layout("Restart", body);
+  return layout("Restart", body, undefined, tradingPaused);
 }
 
-export function renderSettingsPage(env: LoadedEnv, notice?: Notice): string {
+export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPaused = false): string {
   const values = env.values;
   const apiKeyHelp = env.bybitApiKeySet ? "Key saved. Leave the field empty to keep the current value." : "Key not set.";
   const apiSecretHelp = env.bybitApiSecretSet
@@ -234,5 +253,5 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice): string {
   </div>
 </div>`;
 
-  return layout("Settings", body, notice);
+  return layout("Settings", body, notice, tradingPaused);
 }

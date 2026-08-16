@@ -11,7 +11,14 @@ export interface CascadeSignal {
 export type OrderSide = "Buy" | "Sell";
 
 export type SignalDecision = "accepted" | "rejected";
-export type SignalRejectReason = "invalid_schema" | "below_threshold" | "hourly_limit" | "trading_paused";
+export type SignalRejectReason =
+  | "invalid_schema"
+  | "below_threshold"
+  | "hourly_limit"
+  | "trading_paused"
+  | "direction_filtered";
+
+export type DirectionMode = "both" | "long" | "short";
 
 export interface SignalLogEntry {
   ts: number;

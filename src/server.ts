@@ -2,7 +2,7 @@ import "dotenv/config";
 import Fastify, { type FastifyError } from "fastify";
 import { loadConfig } from "./config";
 import { cascadeSignalSchema } from "./schema/cascadeSignal";
-import { checkThreshold } from "./decision/filters";
+import { checkThreshold, checkDirection } from "./decision/filters";
 import { BybitClient } from "./bybit/client";
 import { SignalsLogger } from "./logging/signalsLogger";
 import { OrdersLogger } from "./logging/ordersLogger";
@@ -43,6 +43,12 @@ async function main(): Promise<void> {
     if (isTradingPaused()) {
       signalsLogger.log(signal, "rejected", "trading_paused");
       return reply.code(200).send({ decision: "rejected", reason: "trading_paused" });
+    }
+
+    const directionFilter = checkDirection(signal, config.trading.direction);
+    if (!directionFilter.accepted) {
+      signalsLogger.log(signal, "rejected", directionFilter.reason);
+      return reply.code(200).send({ decision: "rejected", reason: directionFilter.reason });
     }
 
     const filter = checkThreshold(signal, config.trading.minLiquidationUsdt);

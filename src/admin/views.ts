@@ -23,7 +23,30 @@ function bootstrapHead(title: string): string {
     html {
       font-size: 14px;
     }
+    .help-icon {
+      display: inline-flex;
+      cursor: help;
+      color: var(--bs-secondary-color);
+      vertical-align: -0.1em;
+    }
+    .help-icon:hover {
+      color: var(--bs-primary);
+    }
   </style>`;
+}
+
+/** Кружок с вопросом рядом с полем: всплывающая подсказка (Bootstrap tooltip) по наведению/фокусу. */
+function helpIcon(text: string): string {
+  return `<span class="help-icon ms-1" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="${escapeHtml(text)}">
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+      <path d="M5.255 5.786a.237.237 0 0 0 .241.247h.825c.138 0 .248-.113.266-.25.09-.656.54-1.134 1.342-1.134.686 0 1.314.343 1.314 1.168 0 .635-.374.927-.965 1.371-.673.489-1.206 1.06-1.168 1.987l.003.217a.25.25 0 0 0 .25.246h.811a.25.25 0 0 0 .25-.25v-.105c0-.718.273-.995.945-1.492.7-.518 1.353-1.084 1.353-2.132 0-1.51-1.276-2.353-2.678-2.353-1.317 0-2.652.681-2.79 2.28zm1.557 5.763c0 .533.425.927 1.01.927.609 0 1.028-.394 1.028-.927 0-.552-.42-.94-1.029-.94-.584 0-1.009.388-1.009.94z"/>
+    </svg>
+  </span>`;
+}
+
+function labelWithHelp(forId: string, text: string, help: string): string {
+  return `<label class="form-label" for="${forId}">${escapeHtml(text)}${helpIcon(help)}</label>`;
 }
 
 export function renderLoginPage(notice?: Notice): string {
@@ -114,6 +137,9 @@ function layout(title: string, body: string, notice?: Notice, tradingPaused = fa
     ${body}
   </main>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((el) => new bootstrap.Tooltip(el));
+  </script>
 </body>
 </html>`;
 }
@@ -179,9 +205,41 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
 <div class="card shadow-sm">
   <div class="card-body">
     <form method="post" action="/admin/settings">
+      <h2 class="h6 text-uppercase text-secondary">Trading</h2>
+      <div class="row g-3">
+        <div class="col-md-6">
+          ${labelWithHelp("minLiquidationUsdt", "Min liquidation USDT", "Incoming signals below this liquidation size are ignored.")}
+          <input class="form-control" id="minLiquidationUsdt" name="minLiquidationUsdt" value="${escapeHtml(values.minLiquidationUsdt)}" inputmode="decimal" required>
+        </div>
+        <div class="col-md-6">
+          ${labelWithHelp("positionSizeUsdt", "Position size USDT", "Notional size of each opened position, in USDT.")}
+          <input class="form-control" id="positionSizeUsdt" name="positionSizeUsdt" value="${escapeHtml(values.positionSizeUsdt)}" inputmode="decimal" required>
+        </div>
+        <div class="col-md-6">
+          ${labelWithHelp("stopLossPercent", "Stop loss %", "Distance from entry price to the stop-loss order, in percent. Leave empty to disable stop-loss.")}
+          <input class="form-control" id="stopLossPercent" name="stopLossPercent" value="${escapeHtml(values.stopLossPercent)}" inputmode="decimal" placeholder="empty = disabled">
+        </div>
+        <div class="col-md-6">
+          ${labelWithHelp("takeProfitPercent", "Take profit %", "Distance from entry price to the take-profit order, in percent. Leave empty to disable take-profit.")}
+          <input class="form-control" id="takeProfitPercent" name="takeProfitPercent" value="${escapeHtml(values.takeProfitPercent)}" inputmode="decimal" placeholder="empty = disabled">
+        </div>
+        <div class="col-md-6">
+          ${labelWithHelp("maxPositionsPerHour", "Max positions per hour", "Caps how many new positions can be opened within any rolling 60-minute window.")}
+          <input class="form-control" id="maxPositionsPerHour" name="maxPositionsPerHour" value="${escapeHtml(values.maxPositionsPerHour)}" inputmode="numeric" required>
+        </div>
+        <div class="col-md-6">
+          ${labelWithHelp("direction", "Direction", "Which liquidation-cascade signals to trade. Signals in the other direction are logged but ignored.")}
+          <select class="form-select" id="direction" name="direction">
+            <option value="both" ${values.direction === "both" ? "selected" : ""}>Both (long & short)</option>
+            <option value="long" ${values.direction === "long" ? "selected" : ""}>Long only</option>
+            <option value="short" ${values.direction === "short" ? "selected" : ""}>Short only</option>
+          </select>
+        </div>
+      </div>
+      <hr class="my-4">
       <h2 class="h6 text-uppercase text-secondary">Bybit API</h2>
       <div class="mb-3">
-        <label class="form-label" for="bybitApiKey">BYBIT_API_KEY</label>
+        ${labelWithHelp("bybitApiKey", "BYBIT_API_KEY", "API key for your Bybit account, used to place and manage orders.")}
         <input class="form-control" id="bybitApiKey" name="bybitApiKey" type="password" autocomplete="new-password" placeholder="New API key">
         <div class="form-text">${escapeHtml(apiKeyHelp)}</div>
         <div class="form-check mt-2">
@@ -190,7 +248,7 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
         </div>
       </div>
       <div class="mb-3">
-        <label class="form-label" for="bybitApiSecret">BYBIT_API_SECRET</label>
+        ${labelWithHelp("bybitApiSecret", "BYBIT_API_SECRET", "API secret paired with the API key above. Never shown once saved.")}
         <input class="form-control" id="bybitApiSecret" name="bybitApiSecret" type="password" autocomplete="new-password" placeholder="New API secret">
         <div class="form-text">${escapeHtml(apiSecretHelp)}</div>
         <div class="form-check mt-2">
@@ -201,46 +259,19 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
       <div class="mb-3">
         <div class="form-check form-switch">
           <input class="form-check-input" type="checkbox" role="switch" id="bybitTestnet" name="bybitTestnet" value="true" ${values.bybitTestnet ? "checked" : ""}>
-          <label class="form-check-label" for="bybitTestnet">Bybit testnet</label>
+          <label class="form-check-label" for="bybitTestnet">Bybit testnet${helpIcon("When on, orders are placed on Bybit testnet instead of the live exchange.")}</label>
         </div>
-        <div class="form-text">When on, orders are placed on Bybit testnet instead of the live exchange.</div>
       </div>
       <hr class="my-4">
       <h2 class="h6 text-uppercase text-secondary">Server</h2>
       <div class="row g-3">
         <div class="col-md-6">
-          <label class="form-label" for="serverHost">Host</label>
+          ${labelWithHelp("serverHost", "Host", "Local address the executor's HTTP server binds to and listens on.")}
           <input class="form-control" id="serverHost" name="serverHost" value="${escapeHtml(values.serverHost)}" required>
         </div>
         <div class="col-md-6">
-          <label class="form-label" for="serverPort">Port</label>
+          ${labelWithHelp("serverPort", "Port", "Port the executor's HTTP server listens on. Changing this also requires updating EXECUTOR_URL in whatever sends signals here.")}
           <input class="form-control" id="serverPort" name="serverPort" value="${escapeHtml(values.serverPort)}" inputmode="numeric" required>
-          <div class="form-text">Changing this also requires updating EXECUTOR_URL in whatever sends signals here.</div>
-        </div>
-      </div>
-      <hr class="my-4">
-      <h2 class="h6 text-uppercase text-secondary">Trading</h2>
-      <div class="row g-3">
-        <div class="col-md-6">
-          <label class="form-label" for="minLiquidationUsdt">Min liquidation USDT</label>
-          <input class="form-control" id="minLiquidationUsdt" name="minLiquidationUsdt" value="${escapeHtml(values.minLiquidationUsdt)}" inputmode="decimal" required>
-          <div class="form-text">Incoming signals below this liquidation size are ignored.</div>
-        </div>
-        <div class="col-md-6">
-          <label class="form-label" for="positionSizeUsdt">Position size USDT</label>
-          <input class="form-control" id="positionSizeUsdt" name="positionSizeUsdt" value="${escapeHtml(values.positionSizeUsdt)}" inputmode="decimal" required>
-        </div>
-        <div class="col-md-6">
-          <label class="form-label" for="stopLossPercent">Stop loss %</label>
-          <input class="form-control" id="stopLossPercent" name="stopLossPercent" value="${escapeHtml(values.stopLossPercent)}" inputmode="decimal" placeholder="empty = disabled">
-        </div>
-        <div class="col-md-6">
-          <label class="form-label" for="takeProfitPercent">Take profit %</label>
-          <input class="form-control" id="takeProfitPercent" name="takeProfitPercent" value="${escapeHtml(values.takeProfitPercent)}" inputmode="decimal" placeholder="empty = disabled">
-        </div>
-        <div class="col-md-6">
-          <label class="form-label" for="maxPositionsPerHour">Max positions per hour</label>
-          <input class="form-control" id="maxPositionsPerHour" name="maxPositionsPerHour" value="${escapeHtml(values.maxPositionsPerHour)}" inputmode="numeric" required>
         </div>
       </div>
       <div class="alert alert-warning mt-4 mb-3">

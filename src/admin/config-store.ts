@@ -15,6 +15,7 @@ export type EnvFormValues = {
   stopLossPercent: string;
   takeProfitPercent: string;
   maxPositionsPerHour: string;
+  direction: string;
 };
 
 export type LoadedEnv = {
@@ -42,6 +43,7 @@ type TradingConfig = {
     stopLossPercent: number | null;
     takeProfitPercent: number | null;
     maxPositionsPerHour: number;
+    direction: "both" | "long" | "short";
   };
   logging: {
     signalsLogPath: string;
@@ -91,6 +93,13 @@ function parsePort(value: string, label: string): number {
     throw new Error(`${label} must be between 1 and 65535`);
   }
   return parsed;
+}
+
+function parseDirection(value: string): "both" | "long" | "short" {
+  if (value !== "both" && value !== "long" && value !== "short") {
+    throw new Error("Direction must be one of: both, long, short");
+  }
+  return value;
 }
 
 async function atomicWrite(filePath: string, content: string): Promise<void> {
@@ -162,7 +171,8 @@ export async function loadEnv(): Promise<LoadedEnv> {
       positionSizeUsdt: String(config.trading.positionSizeUsdt),
       stopLossPercent: config.trading.stopLossPercent !== null ? String(config.trading.stopLossPercent) : "",
       takeProfitPercent: config.trading.takeProfitPercent !== null ? String(config.trading.takeProfitPercent) : "",
-      maxPositionsPerHour: String(config.trading.maxPositionsPerHour)
+      maxPositionsPerHour: String(config.trading.maxPositionsPerHour),
+      direction: config.trading.direction ?? "both"
     }
   };
 }
@@ -202,6 +212,7 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
   const stopLossPercent = parseOptionalPositiveNumber(input.stopLossPercent, "Stop loss %");
   const takeProfitPercent = parseOptionalPositiveNumber(input.takeProfitPercent, "Take profit %");
   const maxPositionsPerHour = parsePositiveInteger(input.maxPositionsPerHour, "Max positions per hour");
+  const direction = parseDirection(input.direction);
 
   const currentConfig = await readConfig();
   const nextConfig: TradingConfig = {
@@ -212,7 +223,8 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
       positionSizeUsdt,
       stopLossPercent,
       takeProfitPercent,
-      maxPositionsPerHour
+      maxPositionsPerHour,
+      direction
     },
     logging: currentConfig.logging
   };

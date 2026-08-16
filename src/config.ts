@@ -16,6 +16,7 @@ const configSchema = z.object({
     stopLossPercent: z.number().positive().nullish().transform((v) => v ?? null),
     takeProfitPercent: z.number().positive().nullish().transform((v) => v ?? null),
     maxPositionsPerHour: z.number().int().positive(),
+    direction: z.enum(["both", "long", "short"]).default("both"),
   }),
   logging: z.object({
     signalsLogPath: z.string().min(1),

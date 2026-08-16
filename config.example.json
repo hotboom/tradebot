@@ -10,7 +10,8 @@
     "minLiquidationUsdt": 5000000,
     "positionSizeUsdt": 1000,
     "stopLossPercent": 1.5,
-    "takeProfitPercent": null
+    "takeProfitPercent": null,
+    "direction": "both"
   },
   "logging": {
     "signalsLogPath": "./logs/signals.log",

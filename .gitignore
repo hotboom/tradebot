@@ -5,3 +5,4 @@ logs/
 config.json
 .admin-session-epoch
 trading-state.json
+ecosystem.config.js

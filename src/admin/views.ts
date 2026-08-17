@@ -108,7 +108,7 @@ function layout(title: string, body: string, notice?: Notice, tradingPaused = fa
   return `<!doctype html>
 <html lang="en">
 <head>
-  ${bootstrapHead(title)}
+  ${bootstrapHead(`Tradebot2 ${title}`)}
 </head>
 <body class="bg-body-tertiary">
   <nav class="navbar navbar-expand-lg bg-dark navbar-dark">
@@ -223,6 +223,18 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
           </select>
         </div>
         <div class="col-md-6">
+          ${labelWithHelp("maxPositionsPerHour", "Max positions per hour", "Caps how many new positions can be opened within any rolling 60-minute window.")}
+          <input class="form-control" id="maxPositionsPerHour" name="maxPositionsPerHour" value="${escapeHtml(values.maxPositionsPerHour)}" inputmode="numeric" required>
+        </div>
+        <div class="col-md-6">
+          ${labelWithHelp("direction", "Direction", "Which liquidation-cascade signals to trade. Signals in the other direction are logged but ignored.")}
+          <select class="form-select" id="direction" name="direction">
+            <option value="both" ${values.direction === "both" ? "selected" : ""}>Both (long & short)</option>
+            <option value="long" ${values.direction === "long" ? "selected" : ""}>Long only</option>
+            <option value="short" ${values.direction === "short" ? "selected" : ""}>Short only</option>
+          </select>
+        </div>
+        <div class="col-md-6">
           ${labelWithHelp("stopLossPercent", "Stop loss %", "Distance from entry price to the stop-loss order, in percent. Leave empty to disable stop-loss.")}
           <input class="form-control" id="stopLossPercent" name="stopLossPercent" value="${escapeHtml(values.stopLossPercent)}" inputmode="decimal" placeholder="empty = disabled">
         </div>
@@ -236,18 +248,6 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
         <div class="col-md-6">
           ${labelWithHelp("takeProfitPercent", "Take profit %", "Distance from entry price to the take-profit order, in percent. Leave empty to disable take-profit.")}
           <input class="form-control" id="takeProfitPercent" name="takeProfitPercent" value="${escapeHtml(values.takeProfitPercent)}" inputmode="decimal" placeholder="empty = disabled">
-        </div>
-        <div class="col-md-6">
-          ${labelWithHelp("maxPositionsPerHour", "Max positions per hour", "Caps how many new positions can be opened within any rolling 60-minute window.")}
-          <input class="form-control" id="maxPositionsPerHour" name="maxPositionsPerHour" value="${escapeHtml(values.maxPositionsPerHour)}" inputmode="numeric" required>
-        </div>
-        <div class="col-md-6">
-          ${labelWithHelp("direction", "Direction", "Which liquidation-cascade signals to trade. Signals in the other direction are logged but ignored.")}
-          <select class="form-select" id="direction" name="direction">
-            <option value="both" ${values.direction === "both" ? "selected" : ""}>Both (long & short)</option>
-            <option value="long" ${values.direction === "long" ? "selected" : ""}>Long only</option>
-            <option value="short" ${values.direction === "short" ? "selected" : ""}>Short only</option>
-          </select>
         </div>
       </div>
       <hr class="my-4">

@@ -220,6 +220,13 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
           <input class="form-control" id="stopLossPercent" name="stopLossPercent" value="${escapeHtml(values.stopLossPercent)}" inputmode="decimal" placeholder="empty = disabled">
         </div>
         <div class="col-md-6">
+          ${labelWithHelp("stopLossOrderType", "Stop loss order type", "Market places the stop-loss as a market order (guaranteed fill, higher taker fee). Limit places a limit order at the configured stop-loss % to save on fees, plus an independent backup market stop-loss 10% further out (e.g. 2.2% if the main one is 2%) in case the limit order never fills during a fast move.")}
+          <select class="form-select" id="stopLossOrderType" name="stopLossOrderType">
+            <option value="market" ${values.stopLossOrderType === "market" ? "selected" : ""}>Market (default)</option>
+            <option value="limit" ${values.stopLossOrderType === "limit" ? "selected" : ""}>Limit + backup market SL</option>
+          </select>
+        </div>
+        <div class="col-md-6">
           ${labelWithHelp("takeProfitPercent", "Take profit %", "Distance from entry price to the take-profit order, in percent. Leave empty to disable take-profit.")}
           <input class="form-control" id="takeProfitPercent" name="takeProfitPercent" value="${escapeHtml(values.takeProfitPercent)}" inputmode="decimal" placeholder="empty = disabled">
         </div>

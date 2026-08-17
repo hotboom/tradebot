@@ -156,6 +156,7 @@ function envFromForm(form: URLSearchParams): EnvFormValues {
     minLiquidationUsdt: form.get("minLiquidationUsdt") ?? "",
     positionSizeUsdt: form.get("positionSizeUsdt") ?? "",
     stopLossPercent: form.get("stopLossPercent") ?? "",
+    stopLossOrderType: form.get("stopLossOrderType") ?? "market",
     takeProfitPercent: form.get("takeProfitPercent") ?? "",
     maxPositionsPerHour: form.get("maxPositionsPerHour") ?? "",
     direction: form.get("direction") ?? "both"

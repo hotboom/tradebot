@@ -42,6 +42,8 @@ export interface OrderLogEntry {
   qty: number | null;
   entryPriceRef: number;
   sl: number | null;
+  slOrderType: "Market" | "Limit" | null;
+  slBackupPrice: number | null;
   tp: number | null;
   status: OrderStatus;
   bybitOrderId: string | null;

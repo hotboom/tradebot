@@ -5,6 +5,10 @@ import type { CascadeSignal, OrderSide } from "./types";
 import { resolveOrderSide } from "./decision/filters";
 import { calcExitPrices } from "./decision/exits";
 
+// Резервный маркет-SL ставится дальше основного лимитного на этот множитель
+// (при stopLossPercent=2% резервный триггер — на 2.2%).
+const SL_BACKUP_BUFFER_MULTIPLIER = 1.1;
+
 function roundDownToStep(value: number, step: number): number {
   const rounded = Math.floor(value / step) * step;
   // отбрасываем плавающий "хвост" вида 0.30000000000000004
@@ -33,6 +37,7 @@ export class OrderExecutor {
     const entryPriceRef = signal.lastBankruptcyPrice;
     let qty: number | null = null;
     let sl: number | null = null;
+    let slBackup: number | null = null;
     let tp: number | null = null;
     let orderId: string | null = null;
 
@@ -71,12 +76,25 @@ export class OrderExecutor {
       sl = exits.stopLoss !== null ? roundToTick(exits.stopLoss, instrument.tickSize) : null;
       tp = exits.takeProfit !== null ? roundToTick(exits.takeProfit, instrument.tickSize) : null;
 
+      // Резервный маркет-SL считаем заранее (нужен только если основной SL — лимитный).
+      if (sl !== null && this.config.trading.stopLossOrderType === "limit" && this.config.trading.stopLossPercent !== null) {
+        const backupExits = calcExitPrices(
+          side,
+          fillPrice,
+          this.config.trading.stopLossPercent * SL_BACKUP_BUFFER_MULTIPLIER,
+          null
+        );
+        slBackup = backupExits.stopLoss !== null ? roundToTick(backupExits.stopLoss, instrument.tickSize) : null;
+      }
+
       this.ordersLogger.log({
         symbol: signal.symbol,
         side,
         qty,
         entryPriceRef: fillPrice,
         sl,
+        slOrderType: null,
+        slBackupPrice: null,
         tp,
         status: "filled",
         bybitOrderId: orderId,
@@ -89,6 +107,8 @@ export class OrderExecutor {
         qty,
         entryPriceRef,
         sl,
+        slOrderType: null,
+        slBackupPrice: null,
         tp,
         status: "failed",
         bybitOrderId: null,
@@ -99,26 +119,106 @@ export class OrderExecutor {
 
     // Шаг 2 (вне критического пути): выставляем SL/TP на открытую позицию отдельным запросом.
     if (sl !== null || tp !== null) {
+      const preferLimitSl = sl !== null && this.config.trading.stopLossOrderType === "limit";
+      let appliedSlOrderType: "Market" | "Limit" | null = sl !== null ? (preferLimitSl ? "Limit" : "Market") : null;
+
       try {
         await this.client.setTradingStop({
           symbol: signal.symbol,
           qty: qty as number,
           stopLoss: sl,
+          stopLossOrderType: appliedSlOrderType ?? "Market",
           takeProfit: tp,
         });
       } catch (err) {
-        this.ordersLogger.log({
-          symbol: signal.symbol,
-          side,
-          qty,
-          entryPriceRef,
-          sl,
-          tp,
-          status: "failed",
-          bybitOrderId: orderId,
-          error: `SL/TP not set: ${err instanceof Error ? err.message : String(err)}`,
-        });
+        // Лимитный SL не встал (например, недостаточно ликвидности по цене) — пробуем
+        // обычный маркет SL, чтобы не остаться без защиты позиции.
+        if (preferLimitSl) {
+          appliedSlOrderType = "Market";
+          try {
+            await this.client.setTradingStop({
+              symbol: signal.symbol,
+              qty: qty as number,
+              stopLoss: sl,
+              stopLossOrderType: "Market",
+              takeProfit: tp,
+            });
+          } catch (fallbackErr) {
+            this.ordersLogger.log({
+              symbol: signal.symbol,
+              side,
+              qty,
+              entryPriceRef,
+              sl,
+              slOrderType: null,
+              slBackupPrice: null,
+              tp,
+              status: "failed",
+              bybitOrderId: orderId,
+              error: `SL/TP not set (limit SL failed: ${err instanceof Error ? err.message : String(err)}; market SL fallback failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)})`,
+            });
+            return;
+          }
+        } else {
+          this.ordersLogger.log({
+            symbol: signal.symbol,
+            side,
+            qty,
+            entryPriceRef,
+            sl,
+            slOrderType: null,
+            slBackupPrice: null,
+            tp,
+            status: "failed",
+            bybitOrderId: orderId,
+            error: `SL/TP not set: ${err instanceof Error ? err.message : String(err)}`,
+          });
+          return;
+        }
       }
+
+      // Резервный маркет-SL (независимый reduce-only условный ордер) ставим только если
+      // основной действительно встал как Limit — если он уже упал на Market, страховка
+      // избыточна: Market и так закрывает позицию немедленно по срабатыванию.
+      let backupPlaced = false;
+      let backupOrderError: string | null = null;
+      if (appliedSlOrderType === "Limit" && slBackup !== null) {
+        const closingSide: OrderSide = side === "Buy" ? "Sell" : "Buy";
+        const triggerDirection: 1 | 2 = side === "Buy" ? 2 : 1;
+        try {
+          await this.client.submitStopMarketOrder({
+            symbol: signal.symbol,
+            side: closingSide,
+            qty: qty as number,
+            triggerPrice: slBackup,
+            triggerDirection,
+          });
+          backupPlaced = true;
+        } catch (err) {
+          backupOrderError = err instanceof Error ? err.message : String(err);
+        }
+      }
+
+      const notes = [
+        preferLimitSl && appliedSlOrderType === "Market" ? "limit SL rejected, fell back to market SL" : null,
+        appliedSlOrderType === "Limit" && slBackup !== null && !backupPlaced
+          ? `backup market SL not set: ${backupOrderError}`
+          : null,
+      ].filter((note): note is string => note !== null);
+
+      this.ordersLogger.log({
+        symbol: signal.symbol,
+        side,
+        qty,
+        entryPriceRef,
+        sl,
+        slOrderType: appliedSlOrderType,
+        slBackupPrice: appliedSlOrderType === "Limit" && backupPlaced ? slBackup : null,
+        tp,
+        status: "filled",
+        bybitOrderId: orderId,
+        error: notes.length > 0 ? notes.join("; ") : null,
+      });
     }
   }
 }

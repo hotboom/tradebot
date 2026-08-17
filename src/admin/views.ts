@@ -216,6 +216,13 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
           <input class="form-control" id="positionSizeUsdt" name="positionSizeUsdt" value="${escapeHtml(values.positionSizeUsdt)}" inputmode="decimal" required>
         </div>
         <div class="col-md-6">
+          ${labelWithHelp("entryOrderType", "Entry order type", "Market opens the position immediately at the best available price (fastest, pays taker fee — recommended for this fast-moving liquidation-cascade strategy). Limit places a passive post-only order at the best bid/ask and reprices it to chase the book, avoiding taker fees. There is no timeout or market fallback: it waits until fully filled, however long that takes, so entries can be delayed by seconds to minutes compared to market.")}
+          <select class="form-select" id="entryOrderType" name="entryOrderType">
+            <option value="market" ${values.entryOrderType === "market" ? "selected" : ""}>Market (default)</option>
+            <option value="limit" ${values.entryOrderType === "limit" ? "selected" : ""}>Limit (post-only chase, waits until filled)</option>
+          </select>
+        </div>
+        <div class="col-md-6">
           ${labelWithHelp("stopLossPercent", "Stop loss %", "Distance from entry price to the stop-loss order, in percent. Leave empty to disable stop-loss.")}
           <input class="form-control" id="stopLossPercent" name="stopLossPercent" value="${escapeHtml(values.stopLossPercent)}" inputmode="decimal" placeholder="empty = disabled">
         </div>

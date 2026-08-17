@@ -4,6 +4,7 @@ import type { OrdersLogger } from "./logging/ordersLogger";
 import type { CascadeSignal, OrderSide } from "./types";
 import { resolveOrderSide } from "./decision/filters";
 import { calcExitPrices } from "./decision/exits";
+import { chaseLimitEntry } from "./bybit/limitChaseEntry";
 
 // Резервный маркет-SL ставится дальше основного лимитного на этот множитель
 // (при stopLossPercent=2% резервный триггер — на 2.2%).
@@ -40,8 +41,9 @@ export class OrderExecutor {
     let slBackup: number | null = null;
     let tp: number | null = null;
     let orderId: string | null = null;
+    let refMarketPrice: number | null = null;
 
-    // Шаг 1 (критический путь): максимально быстрый вход маркет-ордером без SL/TP.
+    // Шаг 1: вход без SL/TP (маркет — быстрый путь по умолчанию, либо чейз лимитником — см. entryOrderType).
     try {
       const instrument = await this.client.getInstrumentInfo(signal.symbol);
 
@@ -51,19 +53,27 @@ export class OrderExecutor {
         qty = instrument.minOrderQty;
       }
 
-      orderId = await this.client.submitMarketOrder({
-        symbol: signal.symbol,
-        side,
-        qty,
-      });
-
-      // Реальную цену входа берём из позиции (ответ submitOrder её не содержит).
-      // Если позиция ещё не отразилась — откатываемся на lastBankruptcyPrice.
       let fillPrice = entryPriceRef;
-      try {
-        fillPrice = await this.client.getPositionAvgPrice(signal.symbol);
-      } catch {
-        // avgPrice недоступен — считаем SL/TP от lastBankruptcyPrice
+      if (this.config.trading.entryOrderType === "limit") {
+        // Чейзит лимитник на best bid/ask до полного исполнения (без таймаута — см. план).
+        const chase = await chaseLimitEntry(this.client, { symbol: signal.symbol, side, qty });
+        orderId = chase.lastOrderId;
+        fillPrice = chase.avgPrice;
+        refMarketPrice = chase.refPrice;
+      } else {
+        orderId = await this.client.submitMarketOrder({
+          symbol: signal.symbol,
+          side,
+          qty,
+        });
+
+        // Реальную цену входа берём из позиции (ответ submitOrder её не содержит).
+        // Если позиция ещё не отразилась — откатываемся на lastBankruptcyPrice.
+        try {
+          fillPrice = await this.client.getPositionAvgPrice(signal.symbol);
+        } catch {
+          // avgPrice недоступен — считаем SL/TP от lastBankruptcyPrice
+        }
       }
 
       // SL/TP считаем после входа от фактической цены исполнения — не задерживает вход.
@@ -92,6 +102,7 @@ export class OrderExecutor {
         side,
         qty,
         entryPriceRef: fillPrice,
+        refMarketPrice,
         sl,
         slOrderType: null,
         slBackupPrice: null,
@@ -106,6 +117,7 @@ export class OrderExecutor {
         side,
         qty,
         entryPriceRef,
+        refMarketPrice,
         sl,
         slOrderType: null,
         slBackupPrice: null,
@@ -149,6 +161,7 @@ export class OrderExecutor {
               side,
               qty,
               entryPriceRef,
+              refMarketPrice,
               sl,
               slOrderType: null,
               slBackupPrice: null,
@@ -165,6 +178,7 @@ export class OrderExecutor {
             side,
             qty,
             entryPriceRef,
+            refMarketPrice,
             sl,
             slOrderType: null,
             slBackupPrice: null,
@@ -211,6 +225,7 @@ export class OrderExecutor {
         side,
         qty,
         entryPriceRef,
+        refMarketPrice,
         sl,
         slOrderType: appliedSlOrderType,
         slBackupPrice: appliedSlOrderType === "Limit" && backupPlaced ? slBackup : null,

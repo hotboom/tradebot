@@ -9,6 +9,7 @@
   "trading": {
     "minLiquidationUsdt": 5000000,
     "positionSizeUsdt": 1000,
+    "entryOrderType": "market",
     "stopLossPercent": 1.5,
     "stopLossOrderType": "market",
     "takeProfitPercent": null,

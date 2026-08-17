@@ -33,6 +33,39 @@ export interface StopMarketOrderParams {
   triggerDirection: 1 | 2;
 }
 
+export interface OrderbookTop {
+  bestBid: number;
+  bestAsk: number;
+}
+
+export interface LimitOrderParams {
+  symbol: string;
+  side: OrderSide;
+  qty: number;
+  price: number;
+}
+
+export interface AmendOrderParams {
+  symbol: string;
+  orderId: string;
+  price: number;
+}
+
+export interface OrderState {
+  orderStatus: string;
+  cumExecQty: number;
+  avgPrice: number;
+  rejectReason: string | null;
+}
+
+/** Bybit не всегда возвращает один и тот же retCode для "ордера больше не существует"
+ * (уже исполнен/отменён/неверный orderId) — это ожидаемая гонка при чейзинге лимитника,
+ * а не ошибка, поэтому распознаём и по коду, и по тексту сообщения на всякий случай. */
+function isOrderGoneRetCode(retCode: number, retMsg: string): boolean {
+  if (retCode === 110001) return true;
+  return /order not exists|not exist|has been filled|has been (cancell?ed)|too late to cancel/i.test(retMsg);
+}
+
 export class BybitClient {
   private readonly rest: RestClientV5;
   private readonly instrumentCache = new Map<string, InstrumentInfo>();
@@ -178,5 +211,80 @@ export class BybitClient {
       throw new Error(`submitOrder (stop-market backup) failed: ${res.retCode} ${res.retMsg}`);
     }
     return res.result.orderId;
+  }
+
+  /** Лучшие bid/ask текущего стакана (глубина 1 — минимальная, достаточно для чейза лимитника). */
+  async getOrderbook(symbol: string): Promise<OrderbookTop> {
+    const res = await this.rest.getOrderbook({ category: "linear", symbol, limit: 1 });
+    if (res.retCode !== 0) {
+      throw new Error(`getOrderbook failed: ${res.retCode} ${res.retMsg}`);
+    }
+    const bestBid = Number(res.result.b?.[0]?.[0]);
+    const bestAsk = Number(res.result.a?.[0]?.[0]);
+    if (!Number.isFinite(bestBid) || !Number.isFinite(bestAsk) || bestBid <= 0 || bestAsk <= 0) {
+      throw new Error(`No valid orderbook top for ${symbol}`);
+    }
+    return { bestBid, bestAsk };
+  }
+
+  /** Пассивный лимитный ордер (PostOnly — гарантирует maker-комиссию). Важно: retCode 0 здесь
+   * означает только то, что запрос принят биржей, а не то, что ордер встал в стакан — если цена
+   * уже пересеклась, PostOnly асинхронно отклоняется движком матчинга, и это видно только по
+   * последующему опросу статуса (getOrderState), а не по ответу на этот вызов. */
+  async submitLimitOrder(params: LimitOrderParams): Promise<string> {
+    const res = await this.rest.submitOrder({
+      category: "linear",
+      symbol: params.symbol,
+      side: params.side,
+      orderType: "Limit",
+      qty: String(params.qty),
+      price: String(params.price),
+      timeInForce: "PostOnly",
+    });
+    if (res.retCode !== 0) {
+      throw new Error(`submitOrder (limit) failed: ${res.retCode} ${res.retMsg}`);
+    }
+    return res.result.orderId;
+  }
+
+  /** Репрайс резидентного лимитного ордера при чейзинге. Возвращает "gone" вместо throw, если
+   * ордер уже исполнился/пропал между опросом статуса и этим вызовом — ожидаемая гонка, не ошибка. */
+  async amendOrder(params: AmendOrderParams): Promise<"amended" | "gone"> {
+    const res = await this.rest.amendOrder({
+      category: "linear",
+      symbol: params.symbol,
+      orderId: params.orderId,
+      price: String(params.price),
+    });
+    if (res.retCode === 0) return "amended";
+    if (isOrderGoneRetCode(res.retCode, res.retMsg)) return "gone";
+    throw new Error(`amendOrder failed: ${res.retCode} ${res.retMsg}`);
+  }
+
+  /** Текущее состояние ордера. getActiveOrders покрывает резидентные/частично исполненные ордера;
+   * если ордер уже пропал из активных (обычно вскоре после полного исполнения или отмены) —
+   * финальное состояние (cumExecQty/avgPrice/orderStatus) читаем из истории ордеров. */
+  async getOrderState(symbol: string, orderId: string): Promise<OrderState | null> {
+    const active = await this.rest.getActiveOrders({ category: "linear", symbol, orderId });
+    if (active.retCode !== 0) {
+      throw new Error(`getActiveOrders failed: ${active.retCode} ${active.retMsg}`);
+    }
+    let order = active.result.list?.[0];
+
+    if (!order) {
+      const hist = await this.rest.getHistoricOrders({ category: "linear", symbol, orderId });
+      if (hist.retCode !== 0) {
+        throw new Error(`getHistoricOrders failed: ${hist.retCode} ${hist.retMsg}`);
+      }
+      order = hist.result.list?.[0];
+    }
+    if (!order) return null;
+
+    return {
+      orderStatus: order.orderStatus,
+      cumExecQty: Number(order.cumExecQty),
+      avgPrice: Number(order.avgPrice) || 0,
+      rejectReason: order.rejectReason && order.rejectReason !== "EC_NoError" ? order.rejectReason : null,
+    };
   }
 }

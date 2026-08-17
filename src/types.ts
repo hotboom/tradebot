@@ -41,6 +41,12 @@ export interface OrderLogEntry {
   side: OrderSide;
   qty: number | null;
   entryPriceRef: number;
+  /** Лучшая цена нашей стороны стакана в момент старта лимитного чейза (best bid для Buy /
+   * best ask для Sell) — то, по чему исполнился бы маркет-ордер вместо чейза. Только для
+   * entryOrderType: "limit"; null для маркет-входа (там незачем платить лишним запросом
+   * к стакану на критическом пути). Для сравнения фактической цены чейза с гипотетическим
+   * маркет-входом постфактум. */
+  refMarketPrice: number | null;
   sl: number | null;
   slOrderType: "Market" | "Limit" | null;
   slBackupPrice: number | null;

@@ -12,6 +12,7 @@ export type EnvFormValues = {
   serverPort: string;
   minLiquidationUsdt: string;
   positionSizeUsdt: string;
+  entryOrderType: string;
   stopLossPercent: string;
   stopLossOrderType: string;
   takeProfitPercent: string;
@@ -41,6 +42,7 @@ type TradingConfig = {
   trading: {
     minLiquidationUsdt: number;
     positionSizeUsdt: number;
+    entryOrderType: "market" | "limit";
     stopLossPercent: number | null;
     stopLossOrderType: "market" | "limit";
     takeProfitPercent: number | null;
@@ -107,6 +109,13 @@ function parseDirection(value: string): "both" | "long" | "short" {
 function parseStopLossOrderType(value: string): "market" | "limit" {
   if (value !== "market" && value !== "limit") {
     throw new Error("Stop loss order type must be one of: market, limit");
+  }
+  return value;
+}
+
+function parseEntryOrderType(value: string): "market" | "limit" {
+  if (value !== "market" && value !== "limit") {
+    throw new Error("Entry order type must be one of: market, limit");
   }
   return value;
 }
@@ -178,6 +187,7 @@ export async function loadEnv(): Promise<LoadedEnv> {
       serverPort: String(config.server.port),
       minLiquidationUsdt: String(config.trading.minLiquidationUsdt),
       positionSizeUsdt: String(config.trading.positionSizeUsdt),
+      entryOrderType: config.trading.entryOrderType ?? "market",
       stopLossPercent: config.trading.stopLossPercent !== null ? String(config.trading.stopLossPercent) : "",
       stopLossOrderType: config.trading.stopLossOrderType ?? "market",
       takeProfitPercent: config.trading.takeProfitPercent !== null ? String(config.trading.takeProfitPercent) : "",
@@ -219,6 +229,7 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
 
   const minLiquidationUsdt = parsePositiveNumber(input.minLiquidationUsdt, "Min liquidation USDT");
   const positionSizeUsdt = parsePositiveNumber(input.positionSizeUsdt, "Position size USDT");
+  const entryOrderType = parseEntryOrderType(input.entryOrderType);
   const stopLossPercent = parseOptionalPositiveNumber(input.stopLossPercent, "Stop loss %");
   const stopLossOrderType = parseStopLossOrderType(input.stopLossOrderType);
   const takeProfitPercent = parseOptionalPositiveNumber(input.takeProfitPercent, "Take profit %");
@@ -232,6 +243,7 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
     trading: {
       minLiquidationUsdt,
       positionSizeUsdt,
+      entryOrderType,
       stopLossPercent,
       stopLossOrderType,
       takeProfitPercent,

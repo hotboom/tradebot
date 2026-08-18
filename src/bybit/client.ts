@@ -123,17 +123,22 @@ export class BybitClient {
     return price;
   }
 
-  /** Фактическая средняя цена входа по открытой позиции (после исполнения маркет-ордера). */
-  async getPositionAvgPrice(symbol: string): Promise<number> {
+  /** Средняя цена входа и полный текущий объём открытой позиции (после исполнения входа) —
+   * нужны, чтобы считать/сайзить SL/TP на весь объём позиции, а не только на последний вход
+   * (при повторных входах по символу Bybit сам блендит avgPrice по всем филам). Возвращает
+   * null, если позиции нет / данные невалидны — вызывающий код в этом случае откатывается на
+   * цену/объём собственно этого входа. */
+  async getOpenPosition(symbol: string): Promise<{ avgPrice: number; size: number } | null> {
     const res = await this.rest.getPositionInfo({ category: "linear", symbol });
     if (res.retCode !== 0) {
       throw new Error(`getPositionInfo failed: ${res.retCode} ${res.retMsg}`);
     }
-    const price = Number(res.result.list?.[0]?.avgPrice);
-    if (!Number.isFinite(price) || price <= 0) {
-      throw new Error(`No valid avgPrice for ${symbol}`);
+    const avgPrice = Number(res.result.list?.[0]?.avgPrice);
+    const size = Number(res.result.list?.[0]?.size);
+    if (!Number.isFinite(avgPrice) || avgPrice <= 0 || !Number.isFinite(size) || size <= 0) {
+      return null;
     }
-    return price;
+    return { avgPrice, size };
   }
 
   /** Отправка маркет-ордера. Возвращает orderId. */
@@ -259,6 +264,34 @@ export class BybitClient {
     if (res.retCode === 0) return "amended";
     if (isOrderGoneRetCode(res.retCode, res.retMsg)) return "gone";
     throw new Error(`amendOrder failed: ${res.retCode} ${res.retMsg}`);
+  }
+
+  /** Отмена ордера. Возвращает тихо (без throw), если ордер уже исполнился/пропал между
+   * запросом списка и отменой — ожидаемая гонка, не ошибка (см. isOrderGoneRetCode). */
+  async cancelOrder(params: { symbol: string; orderId: string }): Promise<void> {
+    const res = await this.rest.cancelOrder({
+      category: "linear",
+      symbol: params.symbol,
+      orderId: params.orderId,
+    });
+    if (res.retCode === 0) return;
+    if (isOrderGoneRetCode(res.retCode, res.retMsg)) return;
+    throw new Error(`cancelOrder failed: ${res.retCode} ${res.retMsg}`);
+  }
+
+  /** Все наши условные ордера риск-менеджмента позиции, резидентные на бирже для символа:
+   * и независимый backup-SL (submitStopMarketOrder, stopOrderType "Stop"), и Partial SL/TP
+   * самой позиции (созданные через setTradingStop, stopOrderType "PartialStopLoss"/
+   * "PartialTakeProfit"). Важно (проверено на боевом аккаунте, живая позиция BTCUSDT):
+   * повторный вызов setTradingStop в tpslMode: "Partial" НЕ заменяет предыдущие partial-ордера,
+   * а создаёт новую пару поверх — без явной отмены старых на бирже копятся дублирующиеся SL/TP
+   * с устаревшими qty/ценой. Поэтому перед каждым пересозданием чистим здесь всё разом. */
+  async getOpenStopOrders(symbol: string): Promise<string[]> {
+    const res = await this.rest.getActiveOrders({ category: "linear", symbol, orderFilter: "StopOrder" });
+    if (res.retCode !== 0) {
+      throw new Error(`getActiveOrders (StopOrder) failed: ${res.retCode} ${res.retMsg}`);
+    }
+    return (res.result.list ?? []).map((order) => order.orderId);
   }
 
   /** Текущее состояние ордера. getActiveOrders покрывает резидентные/частично исполненные ордера;

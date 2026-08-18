@@ -24,6 +24,12 @@ function roundToTick(value: number, tick: number): number {
 }
 
 export class OrderExecutor {
+  // Сериализация execute() по символу: не даём двум сигналам по одному символу выполняться
+  // параллельно — иначе пересчёт SL/TP от средней цены/объёма позиции (см. run()) и
+  // отмена/пересоздание backup-SL могут гоняться за неактуальным состоянием позиции.
+  // Разные символы друг друга не блокируют (независимые записи в Map).
+  private readonly queues = new Map<string, Promise<void>>();
+
   constructor(
     private readonly config: AppConfig,
     private readonly client: BybitClient,
@@ -31,12 +37,22 @@ export class OrderExecutor {
   ) {}
 
   /** Исполнение принятого сигнала. Ошибки логируются, наружу не бросаются. */
-  async execute(signal: CascadeSignal): Promise<void> {
+  execute(signal: CascadeSignal): Promise<void> {
+    const prev = this.queues.get(signal.symbol) ?? Promise.resolve();
+    const next = prev.then(() => this.run(signal)).catch(() => {});
+    this.queues.set(signal.symbol, next);
+    return next;
+  }
+
+  private async run(signal: CascadeSignal): Promise<void> {
     const side: OrderSide = resolveOrderSide(signal.direction);
     // Цену входа не запрашиваем отдельно (getLastPrice убран из критического пути):
     // qty и SL/TP считаем от lastBankruptcyPrice из сигнала (MVP, проскальзывание допустимо).
     const entryPriceRef = signal.lastBankruptcyPrice;
     let qty: number | null = null;
+    // Полный текущий объём позиции (может быть больше qty при повторном входе по символу) —
+    // от него сайзим SL/TP, чтобы защищать всю позицию, а не только последний вход.
+    let positionQty: number | null = null;
     let sl: number | null = null;
     let slBackup: number | null = null;
     let tp: number | null = null;
@@ -52,6 +68,7 @@ export class OrderExecutor {
       if (qty < instrument.minOrderQty) {
         qty = instrument.minOrderQty;
       }
+      positionQty = qty;
 
       let fillPrice = entryPriceRef;
       if (this.config.trading.entryOrderType === "limit") {
@@ -66,14 +83,20 @@ export class OrderExecutor {
           side,
           qty,
         });
+      }
 
-        // Реальную цену входа берём из позиции (ответ submitOrder её не содержит).
-        // Если позиция ещё не отразилась — откатываемся на lastBankruptcyPrice.
-        try {
-          fillPrice = await this.client.getPositionAvgPrice(signal.symbol);
-        } catch {
-          // avgPrice недоступен — считаем SL/TP от lastBankruptcyPrice
+      // Реальные среднюю цену и полный объём входа берём из позиции (а не из fillPrice/qty
+      // этого конкретного входа) — при повторном входе по символу Bybit уже отразит в позиции
+      // блендед avgPrice и суммарный size по всем входам. Если позиция ещё не отразилась —
+      // откатываемся на цену/объём только этого входа (fillPrice/qty уже посчитаны выше).
+      try {
+        const position = await this.client.getOpenPosition(signal.symbol);
+        if (position) {
+          fillPrice = position.avgPrice;
+          positionQty = position.size;
         }
+      } catch {
+        // позиция недоступна — считаем SL/TP от цены/объёма только этого входа
       }
 
       // SL/TP считаем после входа от фактической цены исполнения — не задерживает вход.
@@ -134,10 +157,25 @@ export class OrderExecutor {
       const preferLimitSl = sl !== null && this.config.trading.stopLossOrderType === "limit";
       let appliedSlOrderType: "Market" | "Limit" | null = sl !== null ? (preferLimitSl ? "Limit" : "Market") : null;
 
+      // Все старые условные ордера риск-менеджмента этой позиции (Partial SL/TP от
+      // setTradingStop + независимый backup-SL) чистим безусловно перед пересозданием —
+      // setTradingStop в tpslMode: "Partial" не заменяет предыдущие partial-ордера при
+      // повторном вызове, а добавляет новые поверх (подтверждено на боевом аккаунте) — без
+      // явной отмены на бирже копятся дублирующиеся SL/TP с устаревшими qty/ценой.
+      let cleanupError: string | null = null;
+      try {
+        const staleOrderIds = await this.client.getOpenStopOrders(signal.symbol);
+        for (const staleOrderId of staleOrderIds) {
+          await this.client.cancelOrder({ symbol: signal.symbol, orderId: staleOrderId });
+        }
+      } catch (err) {
+        cleanupError = err instanceof Error ? err.message : String(err);
+      }
+
       try {
         await this.client.setTradingStop({
           symbol: signal.symbol,
-          qty: qty as number,
+          qty: positionQty as number,
           stopLoss: sl,
           stopLossOrderType: appliedSlOrderType ?? "Market",
           takeProfit: tp,
@@ -150,7 +188,7 @@ export class OrderExecutor {
           try {
             await this.client.setTradingStop({
               symbol: signal.symbol,
-              qty: qty as number,
+              qty: positionQty as number,
               stopLoss: sl,
               stopLossOrderType: "Market",
               takeProfit: tp,
@@ -191,9 +229,9 @@ export class OrderExecutor {
         }
       }
 
-      // Резервный маркет-SL (независимый reduce-only условный ордер) ставим только если
-      // основной действительно встал как Limit — если он уже упал на Market, страховка
-      // избыточна: Market и так закрывает позицию немедленно по срабатыванию.
+      // Резервный маркет-SL ставим только если основной действительно встал как Limit — если
+      // он уже упал на Market, страховка избыточна: Market и так закрывает позицию немедленно
+      // по срабатыванию (старые condition-ордера, включая прошлый backup, уже подчищены выше).
       let backupPlaced = false;
       let backupOrderError: string | null = null;
       if (appliedSlOrderType === "Limit" && slBackup !== null) {
@@ -203,7 +241,7 @@ export class OrderExecutor {
           await this.client.submitStopMarketOrder({
             symbol: signal.symbol,
             side: closingSide,
-            qty: qty as number,
+            qty: positionQty as number,
             triggerPrice: slBackup,
             triggerDirection,
           });
@@ -215,6 +253,7 @@ export class OrderExecutor {
 
       const notes = [
         preferLimitSl && appliedSlOrderType === "Market" ? "limit SL rejected, fell back to market SL" : null,
+        cleanupError ? `stale SL/TP cleanup failed: ${cleanupError}` : null,
         appliedSlOrderType === "Limit" && slBackup !== null && !backupPlaced
           ? `backup market SL not set: ${backupOrderError}`
           : null,

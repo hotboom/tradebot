@@ -1,10 +1,10 @@
-/** Ограничивает число новых позиций в скользящем часовом окне (защита от лавины сигналов при обвале рынка). */
+/** Ограничивает число новых позиций в скользящем 10-минутном окне (защита от лавины сигналов при обвале рынка). */
 export class PositionRateLimiter {
   private readonly limit: number;
   private readonly windowMs: number;
   private timestamps: number[] = [];
 
-  constructor(limit: number, windowMs: number = 60 * 60 * 1000) {
+  constructor(limit: number, windowMs: number = 10 * 60 * 1000) {
     this.limit = limit;
     this.windowMs = windowMs;
   }

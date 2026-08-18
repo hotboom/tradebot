@@ -16,7 +16,7 @@ export type EnvFormValues = {
   stopLossPercent: string;
   stopLossOrderType: string;
   takeProfitPercent: string;
-  maxPositionsPerHour: string;
+  maxPositionsPer10Min: string;
   direction: string;
 };
 
@@ -46,7 +46,7 @@ type TradingConfig = {
     stopLossPercent: number | null;
     stopLossOrderType: "market" | "limit";
     takeProfitPercent: number | null;
-    maxPositionsPerHour: number;
+    maxPositionsPer10Min: number;
     direction: "both" | "long" | "short";
   };
   logging: {
@@ -191,7 +191,7 @@ export async function loadEnv(): Promise<LoadedEnv> {
       stopLossPercent: config.trading.stopLossPercent !== null ? String(config.trading.stopLossPercent) : "",
       stopLossOrderType: config.trading.stopLossOrderType ?? "market",
       takeProfitPercent: config.trading.takeProfitPercent !== null ? String(config.trading.takeProfitPercent) : "",
-      maxPositionsPerHour: String(config.trading.maxPositionsPerHour),
+      maxPositionsPer10Min: String(config.trading.maxPositionsPer10Min),
       direction: config.trading.direction ?? "both"
     }
   };
@@ -233,7 +233,7 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
   const stopLossPercent = parseOptionalPositiveNumber(input.stopLossPercent, "Stop loss %");
   const stopLossOrderType = parseStopLossOrderType(input.stopLossOrderType);
   const takeProfitPercent = parseOptionalPositiveNumber(input.takeProfitPercent, "Take profit %");
-  const maxPositionsPerHour = parsePositiveInteger(input.maxPositionsPerHour, "Max positions per hour");
+  const maxPositionsPer10Min = parsePositiveInteger(input.maxPositionsPer10Min, "Max positions per 10 min");
   const direction = parseDirection(input.direction);
 
   const currentConfig = await readConfig();
@@ -247,7 +247,7 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
       stopLossPercent,
       stopLossOrderType,
       takeProfitPercent,
-      maxPositionsPerHour,
+      maxPositionsPer10Min,
       direction
     },
     logging: currentConfig.logging

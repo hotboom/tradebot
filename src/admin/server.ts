@@ -159,7 +159,7 @@ function envFromForm(form: URLSearchParams): EnvFormValues {
     stopLossPercent: form.get("stopLossPercent") ?? "",
     stopLossOrderType: form.get("stopLossOrderType") ?? "market",
     takeProfitPercent: form.get("takeProfitPercent") ?? "",
-    maxPositionsPerHour: form.get("maxPositionsPerHour") ?? "",
+    maxPositionsPer10Min: form.get("maxPositionsPer10Min") ?? "",
     direction: form.get("direction") ?? "both"
   };
 }

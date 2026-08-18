@@ -223,8 +223,8 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
           </select>
         </div>
         <div class="col-md-6">
-          ${labelWithHelp("maxPositionsPerHour", "Max positions per hour", "Caps how many new positions can be opened within any rolling 60-minute window.")}
-          <input class="form-control" id="maxPositionsPerHour" name="maxPositionsPerHour" value="${escapeHtml(values.maxPositionsPerHour)}" inputmode="numeric" required>
+          ${labelWithHelp("maxPositionsPer10Min", "Max positions per 10 min", "Caps how many new positions can be opened within any rolling 10-minute window.")}
+          <input class="form-control" id="maxPositionsPer10Min" name="maxPositionsPer10Min" value="${escapeHtml(values.maxPositionsPer10Min)}" inputmode="numeric" required>
         </div>
         <div class="col-md-6">
           ${labelWithHelp("direction", "Direction", "Which liquidation-cascade signals to trade. Signals in the other direction are logged but ignored.")}

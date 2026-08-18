@@ -17,7 +17,7 @@ const configSchema = z.object({
     stopLossPercent: z.number().positive().nullish().transform((v) => v ?? null),
     stopLossOrderType: z.enum(["market", "limit"]).nullish().transform((v) => v ?? "market"),
     takeProfitPercent: z.number().positive().nullish().transform((v) => v ?? null),
-    maxPositionsPerHour: z.number().int().positive(),
+    maxPositionsPer10Min: z.number().int().positive(),
     direction: z.enum(["both", "long", "short"]).default("both"),
   }),
   logging: z.object({

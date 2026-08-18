@@ -23,7 +23,7 @@ async function main(): Promise<void> {
   const dedupStore = new DedupStore(
     path.join(path.dirname(path.resolve(config.logging.signalsLogPath)), "processed_signals.log")
   );
-  const positionLimiter = new PositionRateLimiter(config.trading.maxPositionsPerHour);
+  const positionLimiter = new PositionRateLimiter(config.trading.maxPositionsPer10Min);
 
   const bybitClient = new BybitClient(config.bybit.testnet);
   const executor = new OrderExecutor(config, bybitClient, ordersLogger);

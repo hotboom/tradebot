@@ -19,10 +19,14 @@ const configSchema = z.object({
     takeProfitPercent: z.number().positive().nullish().transform((v) => v ?? null),
     maxPositionsPer10Min: z.number().int().positive(),
     direction: z.enum(["both", "long", "short"]).default("both"),
+    breakevenEnabled: z.boolean().nullish().transform((v) => v ?? false),
+    breakevenTriggerPercent: z.number().positive().nullish().transform((v) => v ?? 1),
+    breakevenCheckIntervalSec: z.number().int().positive().nullish().transform((v) => v ?? 60),
   }),
   logging: z.object({
     signalsLogPath: z.string().min(1),
     ordersLogPath: z.string().min(1),
+    breakevenLogPath: z.string().min(1).nullish().transform((v) => v ?? "./logs/breakeven.log"),
   }),
 });
 

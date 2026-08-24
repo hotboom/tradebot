@@ -13,10 +13,14 @@
     "stopLossPercent": 1.5,
     "stopLossOrderType": "market",
     "takeProfitPercent": null,
-    "direction": "both"
+    "direction": "both",
+    "breakevenEnabled": false,
+    "breakevenTriggerPercent": 1,
+    "breakevenCheckIntervalSec": 60
   },
   "logging": {
     "signalsLogPath": "./logs/signals.log",
-    "ordersLogPath": "./logs/orders.log"
+    "ordersLogPath": "./logs/orders.log",
+    "breakevenLogPath": "./logs/breakeven.log"
   }
 }

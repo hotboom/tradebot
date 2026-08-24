@@ -18,6 +18,9 @@ export type EnvFormValues = {
   takeProfitPercent: string;
   maxPositionsPer10Min: string;
   direction: string;
+  breakevenEnabled: boolean;
+  breakevenTriggerPercent: string;
+  breakevenCheckIntervalSec: string;
 };
 
 export type LoadedEnv = {
@@ -48,10 +51,14 @@ type TradingConfig = {
     takeProfitPercent: number | null;
     maxPositionsPer10Min: number;
     direction: "both" | "long" | "short";
+    breakevenEnabled: boolean;
+    breakevenTriggerPercent: number;
+    breakevenCheckIntervalSec: number;
   };
   logging: {
     signalsLogPath: string;
     ordersLogPath: string;
+    breakevenLogPath: string;
   };
 };
 
@@ -192,7 +199,10 @@ export async function loadEnv(): Promise<LoadedEnv> {
       stopLossOrderType: config.trading.stopLossOrderType ?? "market",
       takeProfitPercent: config.trading.takeProfitPercent !== null ? String(config.trading.takeProfitPercent) : "",
       maxPositionsPer10Min: String(config.trading.maxPositionsPer10Min),
-      direction: config.trading.direction ?? "both"
+      direction: config.trading.direction ?? "both",
+      breakevenEnabled: config.trading.breakevenEnabled ?? false,
+      breakevenTriggerPercent: String(config.trading.breakevenTriggerPercent ?? 1),
+      breakevenCheckIntervalSec: String(config.trading.breakevenCheckIntervalSec ?? 60)
     }
   };
 }
@@ -235,6 +245,8 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
   const takeProfitPercent = parseOptionalPositiveNumber(input.takeProfitPercent, "Take profit %");
   const maxPositionsPer10Min = parsePositiveInteger(input.maxPositionsPer10Min, "Max positions per 10 min");
   const direction = parseDirection(input.direction);
+  const breakevenTriggerPercent = parsePositiveNumber(input.breakevenTriggerPercent, "Breakeven trigger %");
+  const breakevenCheckIntervalSec = parsePositiveInteger(input.breakevenCheckIntervalSec, "Breakeven check interval (sec)");
 
   const currentConfig = await readConfig();
   const nextConfig: TradingConfig = {
@@ -248,7 +260,10 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
       stopLossOrderType,
       takeProfitPercent,
       maxPositionsPer10Min,
-      direction
+      direction,
+      breakevenEnabled: input.breakevenEnabled,
+      breakevenTriggerPercent,
+      breakevenCheckIntervalSec
     },
     logging: currentConfig.logging
   };

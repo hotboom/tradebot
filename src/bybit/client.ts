@@ -58,6 +58,21 @@ export interface OrderState {
   rejectReason: string | null;
 }
 
+export interface OpenPositionSummary {
+  symbol: string;
+  side: OrderSide;
+  avgPrice: number;
+  size: number;
+  markPrice: number;
+  stopLoss: number | null;
+  takeProfit: number | null;
+}
+
+export interface FeeRate {
+  takerFeeRate: number;
+  makerFeeRate: number;
+}
+
 /** Bybit не всегда возвращает один и тот же retCode для "ордера больше не существует"
  * (уже исполнен/отменён/неверный orderId) — это ожидаемая гонка при чейзинге лимитника,
  * а не ошибка, поэтому распознаём и по коду, и по тексту сообщения на всякий случай. */
@@ -69,6 +84,7 @@ function isOrderGoneRetCode(retCode: number, retMsg: string): boolean {
 export class BybitClient {
   private readonly rest: RestClientV5;
   private readonly instrumentCache = new Map<string, InstrumentInfo>();
+  private readonly feeRateCache = new Map<string, FeeRate>();
 
   constructor(testnet: boolean) {
     const key = process.env.BYBIT_API_KEY;
@@ -139,6 +155,51 @@ export class BybitClient {
       return null;
     }
     return { avgPrice, size };
+  }
+
+  /** Сводка по всем открытым позициям аккаунта (category linear, settleCoin USDT) — для
+   * периодического монитора переноса стопа в безубыток, которому нужны сразу все позиции,
+   * а не одна по символу. Позиции с нулевым размером (settleCoin-запрос возвращает по одной
+   * записи на каждый когда-либо торговавшийся символ) отфильтровываются. */
+  async getOpenPositions(): Promise<OpenPositionSummary[]> {
+    const res = await this.rest.getPositionInfo({ category: "linear", settleCoin: "USDT" });
+    if (res.retCode !== 0) {
+      throw new Error(`getPositionInfo (list) failed: ${res.retCode} ${res.retMsg}`);
+    }
+    return (res.result.list ?? [])
+      .filter((p) => Number(p.size) > 0)
+      .map((p) => ({
+        symbol: p.symbol,
+        side: p.side === "Sell" ? "Sell" : "Buy",
+        avgPrice: Number(p.avgPrice),
+        size: Number(p.size),
+        markPrice: Number(p.markPrice),
+        stopLoss: p.stopLoss && Number(p.stopLoss) > 0 ? Number(p.stopLoss) : null,
+        takeProfit: p.takeProfit && Number(p.takeProfit) > 0 ? Number(p.takeProfit) : null,
+      }));
+  }
+
+  /** Taker/maker комиссия аккаунта по символу (с кэшированием — тариф не меняется в рамках
+   * жизни процесса). Нужна монитору безубытка, чтобы перенести стоп на цену, где закрытие
+   * позиции (даже по тейкеру) не уходит в минус с учётом уже уплаченной комиссии на входе. */
+  async getFeeRate(symbol: string): Promise<FeeRate> {
+    const cached = this.feeRateCache.get(symbol);
+    if (cached) return cached;
+
+    const res = await this.rest.getFeeRate({ category: "linear", symbol });
+    if (res.retCode !== 0) {
+      throw new Error(`getFeeRate failed: ${res.retCode} ${res.retMsg}`);
+    }
+    const item = res.result.list?.[0];
+    if (!item) {
+      throw new Error(`No fee rate returned for ${symbol}`);
+    }
+    const info: FeeRate = {
+      takerFeeRate: Number(item.takerFeeRate),
+      makerFeeRate: Number(item.makerFeeRate),
+    };
+    this.feeRateCache.set(symbol, info);
+    return info;
   }
 
   /** Отправка маркет-ордера. Возвращает orderId. */

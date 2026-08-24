@@ -6,7 +6,9 @@ import { checkThreshold, checkDirection } from "./decision/filters";
 import { BybitClient } from "./bybit/client";
 import { SignalsLogger } from "./logging/signalsLogger";
 import { OrdersLogger } from "./logging/ordersLogger";
+import { BreakevenLogger } from "./logging/breakevenLogger";
 import { OrderExecutor } from "./executor";
+import { BreakevenMonitor } from "./breakevenMonitor";
 import { DedupStore } from "./dedupStore";
 import { PositionRateLimiter } from "./positionRateLimiter";
 import { startAdminServerIfEnabled } from "./admin/index";
@@ -20,13 +22,19 @@ async function main(): Promise<void> {
 
   const signalsLogger = new SignalsLogger(config.logging.signalsLogPath);
   const ordersLogger = new OrdersLogger(config.logging.ordersLogPath);
+  const breakevenLogger = new BreakevenLogger(config.logging.breakevenLogPath);
   const dedupStore = new DedupStore(
     path.join(path.dirname(path.resolve(config.logging.signalsLogPath)), "processed_signals.log")
   );
   const positionLimiter = new PositionRateLimiter(config.trading.maxPositionsPer10Min);
 
   const bybitClient = new BybitClient(config.bybit.testnet);
-  const executor = new OrderExecutor(config, bybitClient, ordersLogger);
+  const breakevenMonitor = new BreakevenMonitor(config, bybitClient, breakevenLogger);
+  const executor = new OrderExecutor(config, bybitClient, ordersLogger, breakevenMonitor);
+
+  // На случай рестарта процесса (pm2 autorestart/деплой) с уже открытой позицией: если
+  // позиций нет, монитор тут же остановит сам себя на первом тике (см. BreakevenMonitor.tick).
+  breakevenMonitor.start();
 
   const app = Fastify({ logger: true });
 

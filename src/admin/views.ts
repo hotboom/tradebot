@@ -251,6 +251,24 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
         </div>
       </div>
       <hr class="my-4">
+      <h2 class="h6 text-uppercase text-secondary">Breakeven stop</h2>
+      <div class="row g-3">
+        <div class="col-12">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch" id="breakevenEnabled" name="breakevenEnabled" value="true" ${values.breakevenEnabled ? "checked" : ""}>
+            <label class="form-check-label" for="breakevenEnabled">Enable breakeven stop${helpIcon("When on, a background monitor watches every open position and moves its stop-loss to breakeven (entry price adjusted for round-trip taker fee) once the position is at least the trigger % in profit. The stop is placed as a Limit order to save on fees, plus an independent backup market stop-loss slightly further out in case the limit order doesn't fill during a fast move. It runs on a timer while any position is open and stops itself when none are — no action if all positions are closed.")}</label>
+          </div>
+        </div>
+        <div class="col-md-6">
+          ${labelWithHelp("breakevenTriggerPercent", "Trigger %", "Minimum unrealized profit (in percent from entry price) a position must reach before its stop-loss is moved to breakeven.")}
+          <input class="form-control" id="breakevenTriggerPercent" name="breakevenTriggerPercent" value="${escapeHtml(values.breakevenTriggerPercent)}" inputmode="decimal" required>
+        </div>
+        <div class="col-md-6">
+          ${labelWithHelp("breakevenCheckIntervalSec", "Check interval (sec)", "How often, in seconds, the background monitor re-checks open positions for the breakeven condition.")}
+          <input class="form-control" id="breakevenCheckIntervalSec" name="breakevenCheckIntervalSec" value="${escapeHtml(values.breakevenCheckIntervalSec)}" inputmode="numeric" required>
+        </div>
+      </div>
+      <hr class="my-4">
       <h2 class="h6 text-uppercase text-secondary">Bybit API</h2>
       <div class="mb-3">
         ${labelWithHelp("bybitApiKey", "BYBIT_API_KEY", "API key for your Bybit account, used to place and manage orders.")}

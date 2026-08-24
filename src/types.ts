@@ -35,6 +35,23 @@ export interface SignalLogEntry {
 
 export type OrderStatus = "submitted" | "filled" | "failed";
 
+export type BreakevenStatus = "applied" | "failed";
+
+export interface BreakevenLogEntry {
+  ts: number;
+  symbol: string;
+  side: OrderSide;
+  avgPrice: number;
+  markPrice: number;
+  profitPercent: number;
+  previousStopLoss: number | null;
+  newStopLoss: number;
+  slOrderType: "Limit" | "Market" | null;
+  backupStopLoss: number | null;
+  status: BreakevenStatus;
+  error: string | null;
+}
+
 export interface OrderLogEntry {
   ts: number;
   symbol: string;

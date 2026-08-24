@@ -160,7 +160,10 @@ function envFromForm(form: URLSearchParams): EnvFormValues {
     stopLossOrderType: form.get("stopLossOrderType") ?? "market",
     takeProfitPercent: form.get("takeProfitPercent") ?? "",
     maxPositionsPer10Min: form.get("maxPositionsPer10Min") ?? "",
-    direction: form.get("direction") ?? "both"
+    direction: form.get("direction") ?? "both",
+    breakevenEnabled: form.get("breakevenEnabled") === "true",
+    breakevenTriggerPercent: form.get("breakevenTriggerPercent") ?? "",
+    breakevenCheckIntervalSec: form.get("breakevenCheckIntervalSec") ?? ""
   };
 }
 

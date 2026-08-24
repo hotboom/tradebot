@@ -3,25 +3,10 @@ import type { BybitClient } from "./bybit/client";
 import type { OrdersLogger } from "./logging/ordersLogger";
 import type { CascadeSignal, OrderSide } from "./types";
 import { resolveOrderSide } from "./decision/filters";
-import { calcExitPrices } from "./decision/exits";
+import { calcExitPrices, SL_BACKUP_BUFFER_MULTIPLIER } from "./decision/exits";
 import { chaseLimitEntry } from "./bybit/limitChaseEntry";
-
-// Резервный маркет-SL ставится дальше основного лимитного на этот множитель
-// (при stopLossPercent=2% резервный триггер — на 2.2%).
-const SL_BACKUP_BUFFER_MULTIPLIER = 1.1;
-
-function roundDownToStep(value: number, step: number): number {
-  const rounded = Math.floor(value / step) * step;
-  // отбрасываем плавающий "хвост" вида 0.30000000000000004
-  const decimals = (step.toString().split(".")[1] ?? "").length;
-  return Number(rounded.toFixed(decimals));
-}
-
-function roundToTick(value: number, tick: number): number {
-  const rounded = Math.round(value / tick) * tick;
-  const decimals = (tick.toString().split(".")[1] ?? "").length;
-  return Number(rounded.toFixed(decimals));
-}
+import { roundDownToStep, roundToTick } from "./util/rounding";
+import type { BreakevenMonitor } from "./breakevenMonitor";
 
 export class OrderExecutor {
   // Сериализация execute() по символу: не даём двум сигналам по одному символу выполняться
@@ -33,7 +18,8 @@ export class OrderExecutor {
   constructor(
     private readonly config: AppConfig,
     private readonly client: BybitClient,
-    private readonly ordersLogger: OrdersLogger
+    private readonly ordersLogger: OrdersLogger,
+    private readonly breakevenMonitor: BreakevenMonitor
   ) {}
 
   /** Исполнение принятого сигнала. Ошибки логируются, наружу не бросаются. */
@@ -98,6 +84,11 @@ export class OrderExecutor {
       } catch {
         // позиция недоступна — считаем SL/TP от цены/объёма только этого входа
       }
+
+      // Позиция на бирже уже открыта (независимо от того, встанет ли ниже SL/TP) — запускаем
+      // (если ещё не запущен) периодический перенос стопа в безубыток. Сам монитор идемпотентен
+      // и не делает ничего, если механизм выключен в настройках.
+      this.breakevenMonitor.start();
 
       // SL/TP считаем после входа от фактической цены исполнения — не задерживает вход.
       const exits = calcExitPrices(

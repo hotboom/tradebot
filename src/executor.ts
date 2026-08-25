@@ -7,27 +7,27 @@ import { calcExitPrices, SL_BACKUP_BUFFER_MULTIPLIER } from "./decision/exits";
 import { chaseLimitEntry } from "./bybit/limitChaseEntry";
 import { roundDownToStep, roundToTick } from "./util/rounding";
 import type { BreakevenMonitor } from "./breakevenMonitor";
+import type { TrailingStopMonitor } from "./trailingStopMonitor";
+import type { SymbolQueue } from "./util/symbolQueue";
 
 export class OrderExecutor {
-  // Сериализация execute() по символу: не даём двум сигналам по одному символу выполняться
-  // параллельно — иначе пересчёт SL/TP от средней цены/объёма позиции (см. run()) и
-  // отмена/пересоздание backup-SL могут гоняться за неактуальным состоянием позиции.
-  // Разные символы друг друга не блокируют (независимые записи в Map).
-  private readonly queues = new Map<string, Promise<void>>();
-
   constructor(
     private readonly config: AppConfig,
     private readonly client: BybitClient,
     private readonly ordersLogger: OrdersLogger,
-    private readonly breakevenMonitor: BreakevenMonitor
+    private readonly breakevenMonitor: BreakevenMonitor,
+    private readonly trailingStopMonitor: TrailingStopMonitor,
+    // Сериализация по символу (общая с BreakevenMonitor/TrailingStopMonitor): не даём двум
+    // сигналам по одному символу, либо сигналу и тику монитора, выполняться параллельно —
+    // иначе пересчёт SL/TP от средней цены/объёма позиции (см. run()) и отмена/пересоздание
+    // условных ордеров могут гоняться за неактуальным состоянием позиции. Разные символы друг
+    // друга не блокируют.
+    private readonly symbolQueue: SymbolQueue
   ) {}
 
   /** Исполнение принятого сигнала. Ошибки логируются, наружу не бросаются. */
   execute(signal: CascadeSignal): Promise<void> {
-    const prev = this.queues.get(signal.symbol) ?? Promise.resolve();
-    const next = prev.then(() => this.run(signal)).catch(() => {});
-    this.queues.set(signal.symbol, next);
-    return next;
+    return this.symbolQueue.run(signal.symbol, () => this.run(signal)).catch(() => {});
   }
 
   private async run(signal: CascadeSignal): Promise<void> {
@@ -86,9 +86,10 @@ export class OrderExecutor {
       }
 
       // Позиция на бирже уже открыта (независимо от того, встанет ли ниже SL/TP) — запускаем
-      // (если ещё не запущен) периодический перенос стопа в безубыток. Сам монитор идемпотентен
-      // и не делает ничего, если механизм выключен в настройках.
+      // (если ещё не запущены) периодический перенос стопа в безубыток и trailing-stop. Оба
+      // монитора идемпотентны и не делают ничего, если выключены в настройках.
       this.breakevenMonitor.start();
+      this.trailingStopMonitor.start();
 
       // SL/TP считаем после входа от фактической цены исполнения — не задерживает вход.
       const exits = calcExitPrices(

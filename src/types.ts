@@ -52,6 +52,23 @@ export interface BreakevenLogEntry {
   error: string | null;
 }
 
+export type TrailingStatus = "applied" | "failed";
+
+export interface TrailingLogEntry {
+  ts: number;
+  symbol: string;
+  side: OrderSide;
+  avgPrice: number;
+  markPrice: number;
+  profitPercent: number;
+  previousStopLoss: number | null;
+  newStopLoss: number;
+  slOrderType: "Limit" | "Market" | null;
+  backupStopLoss: number | null;
+  status: TrailingStatus;
+  error: string | null;
+}
+
 export interface OrderLogEntry {
   ts: number;
   symbol: string;

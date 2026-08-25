@@ -4,6 +4,7 @@ import type { BreakevenLogger } from "./logging/breakevenLogger";
 import type { OrderSide } from "./types";
 import { SL_BACKUP_BUFFER_MULTIPLIER } from "./decision/exits";
 import { roundToTick } from "./util/rounding";
+import type { SymbolQueue } from "./util/symbolQueue";
 
 const LOG_TAG = "[breakeven]";
 
@@ -20,6 +21,11 @@ const LOG_TAG = "[breakeven]";
  * успешного открытия позиции (см. executor.ts) и на старте процесса (см. server.ts) — если
  * открытых позиций нет, первый же тик сам себя останавливает (clearInterval), и монитор не
  * дёргает биржу до следующего открытия позиции.
+ *
+ * Работает независимо от TrailingStopMonitor (свой enable/trigger/interval в настройках), но
+ * читает/пишет те же условные ордера позиции — оба монитора и executor.ts сериализуют доступ
+ * к позиции по символу через общий SymbolQueue, чтобы не перезаписать более выгодный стоп менее
+ * выгодным из-за гонки между таймерами.
  */
 export class BreakevenMonitor {
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -30,7 +36,8 @@ export class BreakevenMonitor {
   constructor(
     private readonly config: AppConfig,
     private readonly client: BybitClient,
-    private readonly logger: BreakevenLogger
+    private readonly logger: BreakevenLogger,
+    private readonly symbolQueue: SymbolQueue
   ) {}
 
   /** Идемпотентно: повторный вызов при уже запущенном таймере ничего не делает. */
@@ -62,7 +69,7 @@ export class BreakevenMonitor {
       }
       for (const position of positions) {
         try {
-          await this.checkPosition(position);
+          await this.symbolQueue.run(position.symbol, () => this.checkPosition(position));
         } catch (err) {
           console.error(`${LOG_TAG} check failed for ${position.symbol}:`, err);
         }

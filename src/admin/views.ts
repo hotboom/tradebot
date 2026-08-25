@@ -269,6 +269,28 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
         </div>
       </div>
       <hr class="my-4">
+      <h2 class="h6 text-uppercase text-secondary">Trailing stop</h2>
+      <div class="row g-3">
+        <div class="col-12">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch" id="trailingEnabled" name="trailingEnabled" value="true" ${values.trailingEnabled ? "checked" : ""}>
+            <label class="form-check-label" for="trailingEnabled">Enable trailing stop${helpIcon("When on, a background monitor watches every open position and, once it's at least Trigger % in profit, keeps pulling its stop-loss up (long) / down (short) to stay Stop distance % behind the current price. The stop only ever moves in the profitable direction — if price pulls back against the position, the stop is left where it is. Placed as a Limit order to save on fees, plus an independent backup market stop-loss slightly further out in case the limit order doesn't fill during a fast move. Runs independently of (and alongside) the breakeven stop above — both only ever tighten the stop, never loosen it, so whichever has moved it furthest simply wins. It runs on a timer while any position is open and stops itself when none are.")}</label>
+          </div>
+        </div>
+        <div class="col-md-6">
+          ${labelWithHelp("trailingTriggerPercent", "Trigger %", "Minimum unrealized profit (in percent from entry price) a position must reach before trailing starts adjusting its stop-loss. Must be lower than Take profit % above (if set) — otherwise take profit closes the position before trailing ever gets a chance to activate.")}
+          <input class="form-control" id="trailingTriggerPercent" name="trailingTriggerPercent" value="${escapeHtml(values.trailingTriggerPercent)}" inputmode="decimal" required>
+        </div>
+        <div class="col-md-6">
+          ${labelWithHelp("trailingStopPercent", "Stop distance %", "How far behind the current price (in percent) the trailing stop-loss is kept once trailing is active.")}
+          <input class="form-control" id="trailingStopPercent" name="trailingStopPercent" value="${escapeHtml(values.trailingStopPercent)}" inputmode="decimal" required>
+        </div>
+        <div class="col-md-6">
+          ${labelWithHelp("trailingCheckIntervalSec", "Check interval (sec)", "How often, in seconds, the background monitor re-checks open positions and tightens the trailing stop if price has moved further into profit.")}
+          <input class="form-control" id="trailingCheckIntervalSec" name="trailingCheckIntervalSec" value="${escapeHtml(values.trailingCheckIntervalSec)}" inputmode="numeric" required>
+        </div>
+      </div>
+      <hr class="my-4">
       <h2 class="h6 text-uppercase text-secondary">Bybit API</h2>
       <div class="mb-3">
         ${labelWithHelp("bybitApiKey", "BYBIT_API_KEY", "API key for your Bybit account, used to place and manage orders.")}

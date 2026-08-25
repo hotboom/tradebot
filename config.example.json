@@ -16,11 +16,16 @@
     "direction": "both",
     "breakevenEnabled": false,
     "breakevenTriggerPercent": 1,
-    "breakevenCheckIntervalSec": 60
+    "breakevenCheckIntervalSec": 60,
+    "trailingEnabled": false,
+    "trailingTriggerPercent": 5,
+    "trailingStopPercent": 1,
+    "trailingCheckIntervalSec": 60
   },
   "logging": {
     "signalsLogPath": "./logs/signals.log",
     "ordersLogPath": "./logs/orders.log",
-    "breakevenLogPath": "./logs/breakeven.log"
+    "breakevenLogPath": "./logs/breakeven.log",
+    "trailingLogPath": "./logs/trailing.log"
   }
 }

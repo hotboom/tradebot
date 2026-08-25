@@ -22,11 +22,16 @@ const configSchema = z.object({
     breakevenEnabled: z.boolean().nullish().transform((v) => v ?? false),
     breakevenTriggerPercent: z.number().positive().nullish().transform((v) => v ?? 1),
     breakevenCheckIntervalSec: z.number().int().positive().nullish().transform((v) => v ?? 60),
+    trailingEnabled: z.boolean().nullish().transform((v) => v ?? false),
+    trailingTriggerPercent: z.number().positive().nullish().transform((v) => v ?? 5),
+    trailingStopPercent: z.number().positive().nullish().transform((v) => v ?? 1),
+    trailingCheckIntervalSec: z.number().int().positive().nullish().transform((v) => v ?? 60),
   }),
   logging: z.object({
     signalsLogPath: z.string().min(1),
     ordersLogPath: z.string().min(1),
     breakevenLogPath: z.string().min(1).nullish().transform((v) => v ?? "./logs/breakeven.log"),
+    trailingLogPath: z.string().min(1).nullish().transform((v) => v ?? "./logs/trailing.log"),
   }),
 });
 

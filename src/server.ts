@@ -7,8 +7,11 @@ import { BybitClient } from "./bybit/client";
 import { SignalsLogger } from "./logging/signalsLogger";
 import { OrdersLogger } from "./logging/ordersLogger";
 import { BreakevenLogger } from "./logging/breakevenLogger";
+import { TrailingLogger } from "./logging/trailingLogger";
 import { OrderExecutor } from "./executor";
 import { BreakevenMonitor } from "./breakevenMonitor";
+import { TrailingStopMonitor } from "./trailingStopMonitor";
+import { SymbolQueue } from "./util/symbolQueue";
 import { DedupStore } from "./dedupStore";
 import { PositionRateLimiter } from "./positionRateLimiter";
 import { startAdminServerIfEnabled } from "./admin/index";
@@ -23,18 +26,25 @@ async function main(): Promise<void> {
   const signalsLogger = new SignalsLogger(config.logging.signalsLogPath);
   const ordersLogger = new OrdersLogger(config.logging.ordersLogPath);
   const breakevenLogger = new BreakevenLogger(config.logging.breakevenLogPath);
+  const trailingLogger = new TrailingLogger(config.logging.trailingLogPath);
   const dedupStore = new DedupStore(
     path.join(path.dirname(path.resolve(config.logging.signalsLogPath)), "processed_signals.log")
   );
   const positionLimiter = new PositionRateLimiter(config.trading.maxPositionsPer10Min);
 
   const bybitClient = new BybitClient(config.bybit.testnet);
-  const breakevenMonitor = new BreakevenMonitor(config, bybitClient, breakevenLogger);
-  const executor = new OrderExecutor(config, bybitClient, ordersLogger, breakevenMonitor);
+  // Общая очередь: сериализует доступ к условным ордерам позиции по символу между executor'ом,
+  // breakeven- и trailing-мониторами (см. SymbolQueue).
+  const symbolQueue = new SymbolQueue();
+  const breakevenMonitor = new BreakevenMonitor(config, bybitClient, breakevenLogger, symbolQueue);
+  const trailingStopMonitor = new TrailingStopMonitor(config, bybitClient, trailingLogger, symbolQueue);
+  const executor = new OrderExecutor(config, bybitClient, ordersLogger, breakevenMonitor, trailingStopMonitor, symbolQueue);
 
   // На случай рестарта процесса (pm2 autorestart/деплой) с уже открытой позицией: если
-  // позиций нет, монитор тут же остановит сам себя на первом тике (см. BreakevenMonitor.tick).
+  // позиций нет, монитор тут же остановит сам себя на первом тике (см. BreakevenMonitor.tick /
+  // TrailingStopMonitor.tick).
   breakevenMonitor.start();
+  trailingStopMonitor.start();
 
   const app = Fastify({ logger: true });
 

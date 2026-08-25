@@ -21,6 +21,10 @@ export type EnvFormValues = {
   breakevenEnabled: boolean;
   breakevenTriggerPercent: string;
   breakevenCheckIntervalSec: string;
+  trailingEnabled: boolean;
+  trailingTriggerPercent: string;
+  trailingStopPercent: string;
+  trailingCheckIntervalSec: string;
 };
 
 export type LoadedEnv = {
@@ -54,11 +58,16 @@ type TradingConfig = {
     breakevenEnabled: boolean;
     breakevenTriggerPercent: number;
     breakevenCheckIntervalSec: number;
+    trailingEnabled: boolean;
+    trailingTriggerPercent: number;
+    trailingStopPercent: number;
+    trailingCheckIntervalSec: number;
   };
   logging: {
     signalsLogPath: string;
     ordersLogPath: string;
     breakevenLogPath: string;
+    trailingLogPath: string;
   };
 };
 
@@ -202,7 +211,11 @@ export async function loadEnv(): Promise<LoadedEnv> {
       direction: config.trading.direction ?? "both",
       breakevenEnabled: config.trading.breakevenEnabled ?? false,
       breakevenTriggerPercent: String(config.trading.breakevenTriggerPercent ?? 1),
-      breakevenCheckIntervalSec: String(config.trading.breakevenCheckIntervalSec ?? 60)
+      breakevenCheckIntervalSec: String(config.trading.breakevenCheckIntervalSec ?? 60),
+      trailingEnabled: config.trading.trailingEnabled ?? false,
+      trailingTriggerPercent: String(config.trading.trailingTriggerPercent ?? 5),
+      trailingStopPercent: String(config.trading.trailingStopPercent ?? 1),
+      trailingCheckIntervalSec: String(config.trading.trailingCheckIntervalSec ?? 60)
     }
   };
 }
@@ -247,6 +260,18 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
   const direction = parseDirection(input.direction);
   const breakevenTriggerPercent = parsePositiveNumber(input.breakevenTriggerPercent, "Breakeven trigger %");
   const breakevenCheckIntervalSec = parsePositiveInteger(input.breakevenCheckIntervalSec, "Breakeven check interval (sec)");
+  const trailingTriggerPercent = parsePositiveNumber(input.trailingTriggerPercent, "Trailing trigger %");
+  const trailingStopPercent = parsePositiveNumber(input.trailingStopPercent, "Trailing stop distance %");
+  const trailingCheckIntervalSec = parsePositiveInteger(input.trailingCheckIntervalSec, "Trailing check interval (sec)");
+
+  // Если задан TP, он закроет позицию раньше, чем сработает более дальний триггер трейлинга —
+  // тот никогда не успеет включиться. Требуем строго меньше (не "<="), иначе достижение обеих
+  // границ одновременно решает гонка между TP-ордером на бирже и следующим тиком монитора.
+  if (takeProfitPercent !== null && trailingTriggerPercent >= takeProfitPercent) {
+    throw new Error(
+      `Trailing trigger % (${trailingTriggerPercent}) must be less than take profit % (${takeProfitPercent}) — otherwise take profit closes the position before trailing can activate`
+    );
+  }
 
   const currentConfig = await readConfig();
   const nextConfig: TradingConfig = {
@@ -263,7 +288,11 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
       direction,
       breakevenEnabled: input.breakevenEnabled,
       breakevenTriggerPercent,
-      breakevenCheckIntervalSec
+      breakevenCheckIntervalSec,
+      trailingEnabled: input.trailingEnabled,
+      trailingTriggerPercent,
+      trailingStopPercent,
+      trailingCheckIntervalSec
     },
     logging: currentConfig.logging
   };

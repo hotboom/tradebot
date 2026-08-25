@@ -163,7 +163,11 @@ function envFromForm(form: URLSearchParams): EnvFormValues {
     direction: form.get("direction") ?? "both",
     breakevenEnabled: form.get("breakevenEnabled") === "true",
     breakevenTriggerPercent: form.get("breakevenTriggerPercent") ?? "",
-    breakevenCheckIntervalSec: form.get("breakevenCheckIntervalSec") ?? ""
+    breakevenCheckIntervalSec: form.get("breakevenCheckIntervalSec") ?? "",
+    trailingEnabled: form.get("trailingEnabled") === "true",
+    trailingTriggerPercent: form.get("trailingTriggerPercent") ?? "",
+    trailingStopPercent: form.get("trailingStopPercent") ?? "",
+    trailingCheckIntervalSec: form.get("trailingCheckIntervalSec") ?? ""
   };
 }
 

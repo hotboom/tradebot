@@ -75,14 +75,15 @@ export class BreakevenMonitor {
   }
 
   private async checkPosition(position: OpenPositionSummary): Promise<void> {
-    const { symbol, side, avgPrice, markPrice, size, stopLoss, takeProfit } = position;
+    const { symbol, side, avgPrice, markPrice, size } = position;
     const sign = side === "Buy" ? 1 : -1;
     const profitPercent = (((markPrice - avgPrice) / avgPrice) * 100) * sign;
     if (profitPercent < this.config.trading.breakevenTriggerPercent) return;
 
-    const [instrument, feeRate] = await Promise.all([
+    const [instrument, feeRate, stopOrders] = await Promise.all([
       this.client.getInstrumentInfo(symbol),
       this.client.getFeeRate(symbol),
+      this.client.getOpenStopOrders(symbol),
     ]);
 
     // Безубыток с учётом комиссии: цена, при закрытии по которой (по тейкеру, худший случай)
@@ -90,10 +91,21 @@ export class BreakevenMonitor {
     const roundTripFeeRate = feeRate.takerFeeRate * 2;
     const breakevenPrice = roundToTick(avgPrice * (1 + sign * roundTripFeeRate), instrument.tickSize);
 
+    // Бот всегда ставит SL/TP через setTradingStop в tpslMode "Partial" — под этим режимом
+    // Bybit НЕ отражает SL/TP позиции в полях stopLoss/takeProfit самого объекта позиции
+    // (getPositionInfo), они существуют только как независимые резидентные ордера
+    // (stopOrderType "PartialStopLoss"/"PartialTakeProfit"). Поэтому сверяемся с этими
+    // ордерами напрямую, а не с position.stopLoss/position.takeProfit — иначе бот не видит
+    // свой же ранее выставленный стоп и пересоздаёт его на каждом тике.
+    const existingSl = stopOrders.find((o) => o.stopOrderType === "PartialStopLoss");
+    const existingTp = stopOrders.find((o) => o.stopOrderType === "PartialTakeProfit");
+    const currentTakeProfit = existingTp ? existingTp.triggerPrice : null;
+
     // Стоп уже на безубытке или лучше — не отодвигаем его назад и не дёргаем биржу зря на
     // каждом тике.
     const alreadyProtected =
-      stopLoss !== null && (side === "Buy" ? stopLoss >= breakevenPrice : stopLoss <= breakevenPrice);
+      existingSl !== undefined &&
+      (side === "Buy" ? existingSl.triggerPrice >= breakevenPrice : existingSl.triggerPrice <= breakevenPrice);
     if (alreadyProtected) return;
 
     // Резервный market-SL чуть дальше лимитного безубытка — на случай, если лимитный ордер
@@ -107,9 +119,8 @@ export class BreakevenMonitor {
       // Чистим все условные ордера риск-менеджмента позиции (Partial SL/TP, независимый
       // backup-SL) перед пересозданием — см. комментарий к getOpenStopOrders в bybit/client.ts:
       // повторный setTradingStop не заменяет старые partial-ордера, а добавляет новые поверх.
-      const staleOrderIds = await this.client.getOpenStopOrders(symbol);
-      for (const orderId of staleOrderIds) {
-        await this.client.cancelOrder({ symbol, orderId });
+      for (const order of stopOrders) {
+        await this.client.cancelOrder({ symbol, orderId: order.orderId });
       }
 
       // SL — лимитным ордером (maker-комиссия), с фоллбэком на market, если лимитник вообще не
@@ -123,7 +134,7 @@ export class BreakevenMonitor {
           qty: size,
           stopLoss: breakevenPrice,
           stopLossOrderType: "Limit",
-          takeProfit,
+          takeProfit: currentTakeProfit,
         });
       } catch (err) {
         appliedSlOrderType = "Market";
@@ -133,7 +144,7 @@ export class BreakevenMonitor {
           qty: size,
           stopLoss: breakevenPrice,
           stopLossOrderType: "Market",
-          takeProfit,
+          takeProfit: currentTakeProfit,
         });
       }
 
@@ -169,7 +180,7 @@ export class BreakevenMonitor {
         avgPrice,
         markPrice,
         profitPercent,
-        previousStopLoss: stopLoss,
+        previousStopLoss: existingSl ? existingSl.triggerPrice : null,
         newStopLoss: breakevenPrice,
         slOrderType: appliedSlOrderType,
         backupStopLoss: backupPlaced ? backupPrice : null,
@@ -187,7 +198,7 @@ export class BreakevenMonitor {
         avgPrice,
         markPrice,
         profitPercent,
-        previousStopLoss: stopLoss,
+        previousStopLoss: existingSl ? existingSl.triggerPrice : null,
         newStopLoss: breakevenPrice,
         slOrderType: null,
         backupStopLoss: null,

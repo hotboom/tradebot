@@ -20,16 +20,22 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log("[dry-run] raw position:", position);
+  console.log("[dry-run] raw position (note: stopLoss/takeProfit here reflect only tpslMode");
+  console.log("[dry-run] 'Full' stops — this bot always uses 'Partial', see stop orders below):", position);
 
-  const { side, avgPrice, markPrice, stopLoss } = position;
+  const { side, avgPrice, markPrice } = position;
   const sign = side === "Buy" ? 1 : -1;
   const profitPercent = ((markPrice - avgPrice) / avgPrice) * 100 * sign;
 
-  const [instrument, feeRate] = await Promise.all([
+  const [instrument, feeRate, stopOrders] = await Promise.all([
     client.getInstrumentInfo(symbol),
     client.getFeeRate(symbol),
+    client.getOpenStopOrders(symbol),
   ]);
+
+  console.log("[dry-run] resident stop orders (the ones the monitor actually checks):", stopOrders);
+  const existingSl = stopOrders.find((o) => o.stopOrderType === "PartialStopLoss");
+  const existingTp = stopOrders.find((o) => o.stopOrderType === "PartialTakeProfit");
 
   const roundTripFeeRate = feeRate.takerFeeRate * 2;
   const breakevenPrice = roundToTick(avgPrice * (1 + sign * roundTripFeeRate), instrument.tickSize);
@@ -41,7 +47,8 @@ async function main(): Promise<void> {
   const triggerPercent = config.trading.breakevenTriggerPercent;
   const triggered = profitPercent >= triggerPercent;
   const alreadyProtected =
-    stopLoss !== null && (side === "Buy" ? stopLoss >= breakevenPrice : stopLoss <= breakevenPrice);
+    existingSl !== undefined &&
+    (side === "Buy" ? existingSl.triggerPrice >= breakevenPrice : existingSl.triggerPrice <= breakevenPrice);
 
   console.log(`[dry-run] side=${side} avgPrice=${avgPrice} markPrice=${markPrice}`);
   console.log(
@@ -52,7 +59,8 @@ async function main(): Promise<void> {
   console.log(
     `[dry-run] taker fee rate=${feeRate.takerFeeRate} (round-trip=${(roundTripFeeRate * 100).toFixed(4)}%)`
   );
-  console.log(`[dry-run] current stopLoss on exchange=${stopLoss}`);
+  console.log(`[dry-run] existing PartialStopLoss trigger=${existingSl ? existingSl.triggerPrice : null}`);
+  console.log(`[dry-run] existing PartialTakeProfit trigger=${existingTp ? existingTp.triggerPrice : null}`);
   console.log(`[dry-run] would-be breakeven SL (Limit)=${breakevenPrice}`);
   console.log(`[dry-run] would-be backup SL (Market)=${backupPrice}`);
   console.log(`[dry-run] already protected at/beyond breakeven? ${alreadyProtected}`);

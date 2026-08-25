@@ -73,6 +73,16 @@ export interface FeeRate {
   makerFeeRate: number;
 }
 
+export interface OpenStopOrder {
+  orderId: string;
+  /** "PartialStopLoss" / "PartialTakeProfit" — часть SL/TP позиции (setTradingStop, tpslMode
+   * "Partial"); "Stop" — независимый резервный market-ордер (submitStopMarketOrder). */
+  stopOrderType: string;
+  /** Триггерная цена ордера — для PartialStopLoss/PartialTakeProfit совпадает с ценой,
+   * переданной в setTradingStop (slLimitPrice/tpLimitPrice ставятся туда же). */
+  triggerPrice: number;
+}
+
 /** Bybit не всегда возвращает один и тот же retCode для "ордера больше не существует"
  * (уже исполнен/отменён/неверный orderId) — это ожидаемая гонка при чейзинге лимитника,
  * а не ошибка, поэтому распознаём и по коду, и по тексту сообщения на всякий случай. */
@@ -346,13 +356,23 @@ export class BybitClient {
    * "PartialTakeProfit"). Важно (проверено на боевом аккаунте, живая позиция BTCUSDT):
    * повторный вызов setTradingStop в tpslMode: "Partial" НЕ заменяет предыдущие partial-ордера,
    * а создаёт новую пару поверх — без явной отмены старых на бирже копятся дублирующиеся SL/TP
-   * с устаревшими qty/ценой. Поэтому перед каждым пересозданием чистим здесь всё разом. */
-  async getOpenStopOrders(symbol: string): Promise<string[]> {
+   * с устаревшими qty/ценой. Поэтому перед каждым пересозданием чистим здесь всё разом.
+   *
+   * Возвращает не только orderId, но и stopOrderType/triggerPrice каждого ордера: в tpslMode
+   * "Partial" SL/TP самой позиции НЕ отражаются в полях stopLoss/takeProfit объекта позиции
+   * (getPositionInfo) — это независимые резидентные ордера, поэтому единственный надёжный
+   * способ узнать, что уже стоит на бирже (и не переставлять его без необходимости) —
+   * посмотреть на сами эти ордера. */
+  async getOpenStopOrders(symbol: string): Promise<OpenStopOrder[]> {
     const res = await this.rest.getActiveOrders({ category: "linear", symbol, orderFilter: "StopOrder" });
     if (res.retCode !== 0) {
       throw new Error(`getActiveOrders (StopOrder) failed: ${res.retCode} ${res.retMsg}`);
     }
-    return (res.result.list ?? []).map((order) => order.orderId);
+    return (res.result.list ?? []).map((order) => ({
+      orderId: order.orderId,
+      stopOrderType: order.stopOrderType,
+      triggerPrice: Number(order.triggerPrice),
+    }));
   }
 
   /** Текущее состояние ордера. getActiveOrders покрывает резидентные/частично исполненные ордера;

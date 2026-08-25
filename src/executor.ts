@@ -155,9 +155,9 @@ export class OrderExecutor {
       // явной отмены на бирже копятся дублирующиеся SL/TP с устаревшими qty/ценой.
       let cleanupError: string | null = null;
       try {
-        const staleOrderIds = await this.client.getOpenStopOrders(signal.symbol);
-        for (const staleOrderId of staleOrderIds) {
-          await this.client.cancelOrder({ symbol: signal.symbol, orderId: staleOrderId });
+        const staleOrders = await this.client.getOpenStopOrders(signal.symbol);
+        for (const staleOrder of staleOrders) {
+          await this.client.cancelOrder({ symbol: signal.symbol, orderId: staleOrder.orderId });
         }
       } catch (err) {
         cleanupError = err instanceof Error ? err.message : String(err);

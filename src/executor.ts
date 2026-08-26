@@ -1,20 +1,24 @@
 import type { AppConfig } from "./config";
 import type { BybitClient } from "./bybit/client";
 import type { OrdersLogger } from "./logging/ordersLogger";
+import type { ObiLogger } from "./logging/obiLogger";
 import type { CascadeSignal, OrderSide } from "./types";
 import { resolveOrderSide } from "./decision/filters";
 import { calcExitPrices, SL_BACKUP_BUFFER_MULTIPLIER } from "./decision/exits";
 import { chaseLimitEntry } from "./bybit/limitChaseEntry";
+import { waitForObiReversal } from "./obi/obiEntryGate";
 import { roundDownToStep, roundToTick } from "./util/rounding";
 import type { BreakevenMonitor } from "./breakevenMonitor";
 import type { TrailingStopMonitor } from "./trailingStopMonitor";
 import type { SymbolQueue } from "./util/symbolQueue";
+import type { PositionRateLimiter } from "./positionRateLimiter";
 
 export class OrderExecutor {
   constructor(
     private readonly config: AppConfig,
     private readonly client: BybitClient,
     private readonly ordersLogger: OrdersLogger,
+    private readonly obiLogger: ObiLogger,
     private readonly breakevenMonitor: BreakevenMonitor,
     private readonly trailingStopMonitor: TrailingStopMonitor,
     // Сериализация по символу (общая с BreakevenMonitor/TrailingStopMonitor): не даём двум
@@ -22,12 +26,75 @@ export class OrderExecutor {
     // иначе пересчёт SL/TP от средней цены/объёма позиции (см. run()) и отмена/пересоздание
     // условных ордеров могут гоняться за неактуальным состоянием позиции. Разные символы друг
     // друга не блокируют.
-    private readonly symbolQueue: SymbolQueue
+    private readonly symbolQueue: SymbolQueue,
+    // Часовой лимит новых позиций считается по фактическим входам, а не по принятым сигналам —
+    // recordOpen() вызывается только после того, как OBI-гейт (см. ниже) подтвердил разворот и
+    // вход действительно произойдёт, а не на каждую попытку (большая часть которых по счётчику
+    // может быть отменена гейтом и не открыть ни одной позиции).
+    private readonly positionLimiter: PositionRateLimiter
   ) {}
 
-  /** Исполнение принятого сигнала. Ошибки логируются, наружу не бросаются. */
-  execute(signal: CascadeSignal): Promise<void> {
-    return this.symbolQueue.run(signal.symbol, () => this.run(signal)).catch(() => {});
+  /** Исполнение принятого сигнала. Сначала ждёт разворота OBI (см. obi/obiEntryGate.ts) — вход
+   * не по самому дисбалансу книги в сторону сигнала, а по его развороту к нейтральному/
+   * противоположному значению в течение `trading.obi.windowSec` секунд после сигнала. Если
+   * разворот не произошёл вовремя — попытка входа отменяется целиком (ордер не выставляется).
+   * Ошибки логируются, наружу не бросаются. */
+  async execute(signal: CascadeSignal): Promise<void> {
+    try {
+      if (!this.config.trading.obi.enabled) {
+        // OBI-гейт выключен в настройках — прежнее поведение tradebot2: вход сразу по сигналу.
+        if (!this.positionLimiter.canOpen(Date.now())) {
+          this.logCancelled(signal, "hourly_limit_at_trigger");
+          return;
+        }
+        this.positionLimiter.recordOpen(Date.now());
+        await this.symbolQueue.run(signal.symbol, () => this.run(signal));
+        return;
+      }
+
+      // Ожидание разворота выполняется вне symbolQueue: это чтение публичного стакана, оно не
+      // трогает условные ордера позиции и не должно блокировать другие символы или блокироваться
+      // тиками breakeven/trailing-мониторов по этому же символу.
+      const gate = await waitForObiReversal(this.client, this.obiLogger, signal, this.config.trading.obi);
+
+      if (!gate.triggered) {
+        this.logCancelled(
+          signal,
+          `obi_reversal_timeout: no reversal within ${this.config.trading.obi.windowSec}s ` +
+            `(extreme seen: ${gate.extremeSeen}, last obi: ${gate.lastObi ?? "n/a"})`
+        );
+        return;
+      }
+
+      // Разворот подтверждён — перепроверяем часовой лимит прямо перед входом (мог исчерпаться,
+      // пока этот сигнал ждал разворота) и учитываем открытие только сейчас.
+      if (!this.positionLimiter.canOpen(Date.now())) {
+        this.logCancelled(signal, "hourly_limit_at_trigger");
+        return;
+      }
+      this.positionLimiter.recordOpen(Date.now());
+
+      await this.symbolQueue.run(signal.symbol, () => this.run(signal));
+    } catch {
+      // не даём ошибке гейта/входа всплыть наружу — сервер уже ответил на HTTP-запрос сигнала
+    }
+  }
+
+  private logCancelled(signal: CascadeSignal, reason: string): void {
+    this.ordersLogger.log({
+      symbol: signal.symbol,
+      side: resolveOrderSide(signal.direction),
+      qty: null,
+      entryPriceRef: signal.lastBankruptcyPrice,
+      refMarketPrice: null,
+      sl: null,
+      slOrderType: null,
+      slBackupPrice: null,
+      tp: null,
+      status: "cancelled",
+      bybitOrderId: null,
+      error: reason,
+    });
   }
 
   private async run(signal: CascadeSignal): Promise<void> {

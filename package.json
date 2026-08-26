@@ -1,7 +1,7 @@
 {
-  "name": "executor-service",
+  "name": "executor-service-obi",
   "version": "0.1.0",
-  "description": "Executor-бот для торговли по сигналам ликвидаций (MVP)",
+  "description": "Executor-бот для торговли по сигналам ликвидаций с входом по развороту OBI (order book imbalance)",
   "main": "dist/server.js",
   "type": "commonjs",
   "engines": {

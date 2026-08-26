@@ -38,6 +38,12 @@ export interface OrderbookTop {
   bestAsk: number;
 }
 
+export interface OrderbookDepth {
+  /** [price, size][], лучший уровень первым. */
+  bids: [number, number][];
+  asks: [number, number][];
+}
+
 export interface LimitOrderParams {
   symbol: string;
   side: OrderSide;
@@ -301,6 +307,26 @@ export class BybitClient {
       throw new Error(`No valid orderbook top for ${symbol}`);
     }
     return { bestBid, bestAsk };
+  }
+
+  /** Глубина стакана (bid/ask уровни с объёмами) для расчёта order book imbalance при OBI-гейте
+   * входа (см. src/obi/obiEntryGate.ts). Bybit V5 принимает limit только из фиксированного набора
+   * значений для linear (1/50/200/500) — вызывающий код должен передавать одно из них. */
+  async getOrderbookDepth(symbol: string, limit: number): Promise<OrderbookDepth> {
+    const res = await this.rest.getOrderbook({ category: "linear", symbol, limit });
+    if (res.retCode !== 0) {
+      throw new Error(`getOrderbook (depth) failed: ${res.retCode} ${res.retMsg}`);
+    }
+    const toLevels = (raw: [string, string][] | undefined): [number, number][] =>
+      (raw ?? [])
+        .map(([price, size]): [number, number] => [Number(price), Number(size)])
+        .filter(([price, size]) => Number.isFinite(price) && Number.isFinite(size) && size > 0);
+    const bids = toLevels(res.result.b as [string, string][] | undefined);
+    const asks = toLevels(res.result.a as [string, string][] | undefined);
+    if (bids.length === 0 && asks.length === 0) {
+      throw new Error(`Empty orderbook for ${symbol}`);
+    }
+    return { bids, asks };
   }
 
   /** Пассивный лимитный ордер (PostOnly — гарантирует maker-комиссию). Важно: retCode 0 здесь

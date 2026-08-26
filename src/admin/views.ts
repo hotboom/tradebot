@@ -108,12 +108,12 @@ function layout(title: string, body: string, notice?: Notice, tradingPaused = fa
   return `<!doctype html>
 <html lang="en">
 <head>
-  ${bootstrapHead(`Tradebot2 ${title}`)}
+  ${bootstrapHead(`Tradebot OBI ${title}`)}
 </head>
 <body class="bg-body-tertiary">
   <nav class="navbar navbar-expand-lg bg-dark navbar-dark">
     <div class="container">
-      <a class="navbar-brand" href="/admin/settings">Executor</a>
+      <a class="navbar-brand" href="/admin/settings">Executor OBI</a>
       <ul class="navbar-nav ms-auto flex-row align-items-center gap-2">
         <li class="nav-item">
           ${tradingBadge}
@@ -216,7 +216,7 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
           <input class="form-control" id="positionSizeUsdt" name="positionSizeUsdt" value="${escapeHtml(values.positionSizeUsdt)}" inputmode="decimal" required>
         </div>
         <div class="col-md-6">
-          ${labelWithHelp("entryOrderType", "Entry order type", "Market opens the position immediately at the best available price (fastest, pays taker fee — recommended for this fast-moving liquidation-cascade strategy). Limit places a passive post-only order at the best bid/ask and reprices it to chase the book, avoiding taker fees. There is no timeout or market fallback: it waits until fully filled, however long that takes, so entries can be delayed by seconds to minutes compared to market.")}
+          ${labelWithHelp("entryOrderType", "Entry order type", "How the position is opened once the entry trigger fires — immediately if the OBI gate below is off, or once it confirms a reversal if it's on. Market opens at the best available price (fastest, pays taker fee). Limit places a passive post-only order at the best bid/ask and reprices it to chase the book, avoiding taker fees. There is no timeout or market fallback: it waits until fully filled, however long that takes, so entries can be delayed by seconds to minutes compared to market.")}
           <select class="form-select" id="entryOrderType" name="entryOrderType">
             <option value="market" ${values.entryOrderType === "market" ? "selected" : ""}>Market (default)</option>
             <option value="limit" ${values.entryOrderType === "limit" ? "selected" : ""}>Limit (post-only chase, waits until filled)</option>
@@ -248,6 +248,28 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
         <div class="col-md-6">
           ${labelWithHelp("takeProfitPercent", "Take profit %", "Distance from entry price to the take-profit order, in percent. Leave empty to disable take-profit.")}
           <input class="form-control" id="takeProfitPercent" name="takeProfitPercent" value="${escapeHtml(values.takeProfitPercent)}" inputmode="decimal" placeholder="empty = disabled">
+        </div>
+      </div>
+      <hr class="my-4">
+      <h2 class="h6 text-uppercase text-secondary">Order book imbalance (OBI) entry gate</h2>
+      <div class="row g-3">
+        <div class="col-12">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch" id="obiEnabled" name="obiEnabled" value="true" ${values.obiEnabled ? "checked" : ""}>
+            <label class="form-check-label" for="obiEnabled">Enable OBI entry gate${helpIcon("When on, an accepted signal does not open a position immediately. Instead the bot polls the order book and waits for the order book imbalance (OBI = (bidVolume - askVolume) / (bidVolume + askVolume) over the top 50 levels, range -1..+1) to reverse: for a LONG signal it first waits to see OBI drop to or below -Extreme threshold (confirms the liquidation cascade is really pushing the book, i.e. sellers dominate), then waits for it to recover to at least Reversal threshold (neutral or buyers regaining control) — that recovery, not the initial negative OBI, is the actual entry trigger. SHORT is the mirror image (extreme positive, then reversal down). If the reversal doesn't happen within the reversal window, the entry attempt is cancelled outright — no market fallback, no indefinite wait. Every poll is logged to logs/obi.log for later analysis of book behavior during cascades. When off, the bot enters immediately on signal like the plain market/limit path, with no OBI wait.")}</label>
+          </div>
+        </div>
+        <div class="col-md-4">
+          ${labelWithHelp("obiExtremeThreshold", "Extreme threshold", "OBI magnitude (0..1) that counts as a confirmed cascade imbalance: LONG needs OBI <= -this value, SHORT needs OBI >= +this value, before the gate starts watching for a reversal. Higher = requires a more lopsided book before it counts as a real cascade.")}
+          <input class="form-control" id="obiExtremeThreshold" name="obiExtremeThreshold" value="${escapeHtml(values.obiExtremeThreshold)}" inputmode="decimal" required>
+        </div>
+        <div class="col-md-4">
+          ${labelWithHelp("obiReversalThreshold", "Reversal threshold", "OBI level the book must reach after the extreme to trigger entry: LONG enters once OBI >= this value, SHORT once OBI <= -this value. 0 = neutral book. Positive = require the book to flip into the opposite side before entering (stricter, later entry); negative = allow entry slightly before full neutrality (earlier entry).")}
+          <input class="form-control" id="obiReversalThreshold" name="obiReversalThreshold" value="${escapeHtml(values.obiReversalThreshold)}" inputmode="decimal" required>
+        </div>
+        <div class="col-md-4">
+          ${labelWithHelp("obiWindowSec", "Reversal window (sec)", "How many seconds after the signal the bot waits for the OBI reversal. If it doesn't happen in time, the entry attempt is cancelled entirely (logged to orders.log as cancelled) — the bot never waits longer or falls back to entering anyway.")}
+          <input class="form-control" id="obiWindowSec" name="obiWindowSec" value="${escapeHtml(values.obiWindowSec)}" inputmode="decimal" required>
         </div>
       </div>
       <hr class="my-4">

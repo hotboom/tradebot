@@ -26,6 +26,10 @@ export type EnvFormValues = {
   trailingTriggerPercent: string;
   trailingStopPercent: string;
   trailingCheckIntervalSec: string;
+  obiEnabled: boolean;
+  obiExtremeThreshold: string;
+  obiReversalThreshold: string;
+  obiWindowSec: string;
 };
 
 export type LoadedEnv = {
@@ -64,12 +68,19 @@ type TradingConfig = {
     trailingTriggerPercent: number;
     trailingStopPercent: number;
     trailingCheckIntervalSec: number;
+    obi: {
+      enabled: boolean;
+      extremeThreshold: number;
+      reversalThreshold: number;
+      windowSec: number;
+    };
   };
   logging: {
     signalsLogPath: string;
     ordersLogPath: string;
     breakevenLogPath: string;
     trailingLogPath: string;
+    obiLogPath: string;
   };
 };
 
@@ -145,6 +156,15 @@ function parseEntryOrderType(value: string): "market" | "limit" {
     throw new Error("Entry order type must be one of: market, limit");
   }
   return value;
+}
+
+function parseObiRatio(value: string, label: string, min: number, max: number): number {
+  const normalized = normalizeNumberInput(value);
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    throw new Error(`${label} must be a number between ${min} and ${max}`);
+  }
+  return parsed;
 }
 
 async function atomicWrite(filePath: string, content: string): Promise<void> {
@@ -227,7 +247,11 @@ export async function loadEnv(): Promise<LoadedEnv> {
       trailingEnabled: config.trading.trailingEnabled ?? false,
       trailingTriggerPercent: String(config.trading.trailingTriggerPercent ?? 5),
       trailingStopPercent: String(config.trading.trailingStopPercent ?? 1),
-      trailingCheckIntervalSec: String(config.trading.trailingCheckIntervalSec ?? 60)
+      trailingCheckIntervalSec: String(config.trading.trailingCheckIntervalSec ?? 60),
+      obiEnabled: config.trading.obi?.enabled ?? true,
+      obiExtremeThreshold: String(config.trading.obi?.extremeThreshold ?? 0.35),
+      obiReversalThreshold: String(config.trading.obi?.reversalThreshold ?? 0),
+      obiWindowSec: String(config.trading.obi?.windowSec ?? 10)
     }
   };
 }
@@ -276,6 +300,9 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
   const trailingTriggerPercent = parsePositiveNumber(input.trailingTriggerPercent, "Trailing trigger %");
   const trailingStopPercent = parsePositiveNumber(input.trailingStopPercent, "Trailing stop distance %");
   const trailingCheckIntervalSec = parsePositiveInteger(input.trailingCheckIntervalSec, "Trailing check interval (sec)");
+  const obiExtremeThreshold = parseObiRatio(input.obiExtremeThreshold, "OBI extreme threshold", 0, 1);
+  const obiReversalThreshold = parseObiRatio(input.obiReversalThreshold, "OBI reversal threshold", -1, 1);
+  const obiWindowSec = parsePositiveNumber(input.obiWindowSec, "OBI reversal window (sec)");
 
   // Если задан TP, он закроет позицию раньше, чем сработает более дальний триггер трейлинга —
   // тот никогда не успеет включиться. Требуем строго меньше (не "<="), иначе достижение обеих
@@ -306,7 +333,13 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
       trailingEnabled: input.trailingEnabled,
       trailingTriggerPercent,
       trailingStopPercent,
-      trailingCheckIntervalSec
+      trailingCheckIntervalSec,
+      obi: {
+        enabled: input.obiEnabled,
+        extremeThreshold: obiExtremeThreshold,
+        reversalThreshold: obiReversalThreshold,
+        windowSec: obiWindowSec
+      }
     },
     logging: currentConfig.logging
   };

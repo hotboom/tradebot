@@ -33,7 +33,7 @@ export interface SignalLogEntry {
   reason: SignalRejectReason | null;
 }
 
-export type OrderStatus = "submitted" | "filled" | "failed";
+export type OrderStatus = "submitted" | "filled" | "failed" | "cancelled";
 
 export type BreakevenStatus = "applied" | "failed";
 
@@ -67,6 +67,29 @@ export interface TrailingLogEntry {
   backupStopLoss: number | null;
   status: TrailingStatus;
   error: string | null;
+}
+
+/**
+ * Фаза OBI-гейта, в которой сделан этот замер (см. src/obi/obiEntryGate.ts):
+ * "waiting_extreme" — ждём подтверждения каскада (сильный дисбаланс в сторону сигнала);
+ * "waiting_reversal" — экстремум уже увиден, ждём разворота обратно к нейтральному/противоположному.
+ */
+export type ObiGatePhase = "waiting_extreme" | "waiting_reversal";
+
+export type ObiGateEvent = "sample" | "extreme_seen" | "triggered" | "timeout";
+
+export interface ObiLogEntry {
+  ts: number;
+  symbol: string;
+  direction: CascadeSignal["direction"];
+  signalTimestamp: number;
+  elapsedMs: number;
+  obi: number;
+  bidVolume: number;
+  askVolume: number;
+  phase: ObiGatePhase;
+  extremeSeen: boolean;
+  event: ObiGateEvent;
 }
 
 export interface OrderLogEntry {

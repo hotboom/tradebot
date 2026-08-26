@@ -1,6 +1,6 @@
 {
   "server": {
-    "port": 4001,
+    "port": 4004,
     "host": "127.0.0.1"
   },
   "bybit": {
@@ -13,6 +13,7 @@
     "stopLossPercent": 1.5,
     "stopLossOrderType": "market",
     "takeProfitPercent": null,
+    "maxPositionsPer10Min": 3,
     "direction": "both",
     "breakevenEnabled": false,
     "breakevenTriggerPercent": 1,
@@ -21,12 +22,19 @@
     "trailingEnabled": false,
     "trailingTriggerPercent": 5,
     "trailingStopPercent": 1,
-    "trailingCheckIntervalSec": 60
+    "trailingCheckIntervalSec": 60,
+    "obi": {
+      "enabled": true,
+      "extremeThreshold": 0.35,
+      "reversalThreshold": 0,
+      "windowSec": 10
+    }
   },
   "logging": {
     "signalsLogPath": "./logs/signals.log",
     "ordersLogPath": "./logs/orders.log",
     "breakevenLogPath": "./logs/breakeven.log",
-    "trailingLogPath": "./logs/trailing.log"
+    "trailingLogPath": "./logs/trailing.log",
+    "obiLogPath": "./logs/obi.log"
   }
 }

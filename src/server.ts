@@ -6,6 +6,7 @@ import { checkThreshold, checkDirection } from "./decision/filters";
 import { BybitClient } from "./bybit/client";
 import { SignalsLogger } from "./logging/signalsLogger";
 import { OrdersLogger } from "./logging/ordersLogger";
+import { ObiLogger } from "./logging/obiLogger";
 import { BreakevenLogger } from "./logging/breakevenLogger";
 import { TrailingLogger } from "./logging/trailingLogger";
 import { OrderExecutor } from "./executor";
@@ -25,6 +26,7 @@ async function main(): Promise<void> {
 
   const signalsLogger = new SignalsLogger(config.logging.signalsLogPath);
   const ordersLogger = new OrdersLogger(config.logging.ordersLogPath);
+  const obiLogger = new ObiLogger(config.logging.obiLogPath);
   const breakevenLogger = new BreakevenLogger(config.logging.breakevenLogPath);
   const trailingLogger = new TrailingLogger(config.logging.trailingLogPath);
   const dedupStore = new DedupStore(
@@ -38,7 +40,16 @@ async function main(): Promise<void> {
   const symbolQueue = new SymbolQueue();
   const breakevenMonitor = new BreakevenMonitor(config, bybitClient, breakevenLogger, symbolQueue);
   const trailingStopMonitor = new TrailingStopMonitor(config, bybitClient, trailingLogger, symbolQueue);
-  const executor = new OrderExecutor(config, bybitClient, ordersLogger, breakevenMonitor, trailingStopMonitor, symbolQueue);
+  const executor = new OrderExecutor(
+    config,
+    bybitClient,
+    ordersLogger,
+    obiLogger,
+    breakevenMonitor,
+    trailingStopMonitor,
+    symbolQueue,
+    positionLimiter
+  );
 
   // На случай рестарта процесса (pm2 autorestart/деплой) с уже открытой позицией: если
   // позиций нет, монитор тут же остановит сам себя на первом тике (см. BreakevenMonitor.tick /
@@ -75,7 +86,9 @@ async function main(): Promise<void> {
       return reply.code(200).send({ decision: "rejected", reason: filter.reason });
     }
 
-    // Защита от лавины сигналов при обвале рынка: не более N новых позиций в скользящий час
+    // Защита от лавины сигналов при обвале рынка: не более N новых позиций в скользящий час.
+    // Быстрый предварительный отказ здесь; финальная проверка + учёт открытия — в executor'е,
+    // непосредственно перед входом (после OBI-гейта — см. execute()), а не на каждую попытку.
     if (!positionLimiter.canOpen(Date.now())) {
       signalsLogger.log(signal, "rejected", "hourly_limit");
       return reply.code(200).send({ decision: "rejected", reason: "hourly_limit" });
@@ -90,9 +103,8 @@ async function main(): Promise<void> {
     }
     dedupStore.add(dedupKey);
 
-    positionLimiter.recordOpen(Date.now());
-
-    // Исполнение асинхронно, ошибки логируются внутри executor'а
+    // Исполнение асинхронно (ждёт разворота OBI, затем входит — см. executor.ts), ошибки
+    // логируются внутри executor'а
     void executor.execute(signal);
 
     return reply.code(200).send({ decision: "accepted", duplicate: false });

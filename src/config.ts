@@ -27,12 +27,22 @@ const configSchema = z.object({
     trailingTriggerPercent: z.number().positive().nullish().transform((v) => v ?? 5),
     trailingStopPercent: z.number().positive().nullish().transform((v) => v ?? 1),
     trailingCheckIntervalSec: z.number().int().positive().nullish().transform((v) => v ?? 60),
+    obi: z
+      .object({
+        enabled: z.boolean().nullish().transform((v) => v ?? true),
+        extremeThreshold: z.number().min(0).max(1).nullish().transform((v) => v ?? 0.35),
+        reversalThreshold: z.number().min(-1).max(1).nullish().transform((v) => v ?? 0),
+        windowSec: z.number().positive().nullish().transform((v) => v ?? 10),
+      })
+      .nullish()
+      .transform((v) => v ?? { enabled: true, extremeThreshold: 0.35, reversalThreshold: 0, windowSec: 10 }),
   }),
   logging: z.object({
     signalsLogPath: z.string().min(1),
     ordersLogPath: z.string().min(1),
     breakevenLogPath: z.string().min(1).nullish().transform((v) => v ?? "./logs/breakeven.log"),
     trailingLogPath: z.string().min(1).nullish().transform((v) => v ?? "./logs/trailing.log"),
+    obiLogPath: z.string().min(1).nullish().transform((v) => v ?? "./logs/obi.log"),
   }),
 });
 

@@ -21,9 +21,12 @@ const LOG_TAG = "[breakeven]";
  * приём, что и для основного SL в executor.ts, см. SL_BACKUP_BUFFER_MULTIPLIER).
  *
  * Работает как таймер, а не постоянный цикл: start() запускается один раз после каждого
- * успешного открытия позиции (см. executor.ts) и на старте процесса (см. server.ts) — если
- * открытых позиций нет, первый же тик сам себя останавливает (clearInterval), и монитор не
- * дёргает биржу до следующего открытия позиции.
+ * успешного открытия позиции (см. executor.ts) и на старте процесса (см. server.ts). Первая
+ * проверка происходит не сразу, а через breakevenCheckIntervalSec после открытия — чтобы
+ * резкий, но кратковременный всплеск волатильности сразу после входа (например, в момент
+ * ликвидации на рынке) не переносил стоп в безубыток раньше времени и не выбивал позицию
+ * на развороте. Если к моменту первого тика открытых позиций уже нет, тик сам себя
+ * останавливает (clearInterval), и монитор не дёргает биржу до следующего открытия позиции.
  *
  * Работает независимо от TrailingStopMonitor (свой enable/trigger/interval в настройках), но
  * читает/пишет те же условные ордера позиции — оба монитора и executor.ts сериализуют доступ
@@ -51,7 +54,6 @@ export class BreakevenMonitor {
     const intervalMs = this.config.trading.breakevenCheckIntervalSec * 1000;
     console.log(`${LOG_TAG} monitor started (interval ${this.config.trading.breakevenCheckIntervalSec}s)`);
     this.timer = setInterval(() => void this.tick(), intervalMs);
-    void this.tick();
   }
 
   private stop(): void {

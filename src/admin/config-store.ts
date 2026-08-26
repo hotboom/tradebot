@@ -20,6 +20,7 @@ export type EnvFormValues = {
   direction: string;
   breakevenEnabled: boolean;
   breakevenTriggerPercent: string;
+  breakevenExtraProfitPercent: string;
   breakevenCheckIntervalSec: string;
   trailingEnabled: boolean;
   trailingTriggerPercent: string;
@@ -57,6 +58,7 @@ type TradingConfig = {
     direction: "both" | "long" | "short";
     breakevenEnabled: boolean;
     breakevenTriggerPercent: number;
+    breakevenExtraProfitPercent: number;
     breakevenCheckIntervalSec: number;
     trailingEnabled: boolean;
     trailingTriggerPercent: number;
@@ -86,6 +88,15 @@ function parsePositiveNumber(value: string, label: string): number {
   const parsed = Number(normalized);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     throw new Error(`${label} must be a positive number`);
+  }
+  return parsed;
+}
+
+function parseNonNegativeNumber(value: string, label: string): number {
+  const normalized = normalizeNumberInput(value);
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${label} must be a non-negative number`);
   }
   return parsed;
 }
@@ -211,6 +222,7 @@ export async function loadEnv(): Promise<LoadedEnv> {
       direction: config.trading.direction ?? "both",
       breakevenEnabled: config.trading.breakevenEnabled ?? false,
       breakevenTriggerPercent: String(config.trading.breakevenTriggerPercent ?? 1),
+      breakevenExtraProfitPercent: String(config.trading.breakevenExtraProfitPercent ?? 0.1),
       breakevenCheckIntervalSec: String(config.trading.breakevenCheckIntervalSec ?? 60),
       trailingEnabled: config.trading.trailingEnabled ?? false,
       trailingTriggerPercent: String(config.trading.trailingTriggerPercent ?? 5),
@@ -259,6 +271,7 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
   const maxPositionsPer10Min = parsePositiveInteger(input.maxPositionsPer10Min, "Max positions per 10 min");
   const direction = parseDirection(input.direction);
   const breakevenTriggerPercent = parsePositiveNumber(input.breakevenTriggerPercent, "Breakeven trigger %");
+  const breakevenExtraProfitPercent = parseNonNegativeNumber(input.breakevenExtraProfitPercent, "Breakeven extra profit %");
   const breakevenCheckIntervalSec = parsePositiveInteger(input.breakevenCheckIntervalSec, "Breakeven check interval (sec)");
   const trailingTriggerPercent = parsePositiveNumber(input.trailingTriggerPercent, "Trailing trigger %");
   const trailingStopPercent = parsePositiveNumber(input.trailingStopPercent, "Trailing stop distance %");
@@ -288,6 +301,7 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
       direction,
       breakevenEnabled: input.breakevenEnabled,
       breakevenTriggerPercent,
+      breakevenExtraProfitPercent,
       breakevenCheckIntervalSec,
       trailingEnabled: input.trailingEnabled,
       trailingTriggerPercent,

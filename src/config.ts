@@ -21,6 +21,7 @@ const configSchema = z.object({
     direction: z.enum(["both", "long", "short"]).default("both"),
     breakevenEnabled: z.boolean().nullish().transform((v) => v ?? false),
     breakevenTriggerPercent: z.number().positive().nullish().transform((v) => v ?? 1),
+    breakevenExtraProfitPercent: z.number().nonnegative().nullish().transform((v) => v ?? 0.1),
     breakevenCheckIntervalSec: z.number().int().positive().nullish().transform((v) => v ?? 60),
     trailingEnabled: z.boolean().nullish().transform((v) => v ?? false),
     trailingTriggerPercent: z.number().positive().nullish().transform((v) => v ?? 5),

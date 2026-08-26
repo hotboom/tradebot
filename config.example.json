@@ -16,6 +16,7 @@
     "direction": "both",
     "breakevenEnabled": false,
     "breakevenTriggerPercent": 1,
+    "breakevenExtraProfitPercent": 0.1,
     "breakevenCheckIntervalSec": 60,
     "trailingEnabled": false,
     "trailingTriggerPercent": 5,

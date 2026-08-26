@@ -9,9 +9,12 @@ import type { SymbolQueue } from "./util/symbolQueue";
 const LOG_TAG = "[breakeven]";
 
 /**
- * Периодически проверяет все открытые позиции и переносит стоп-лосс в безубыток (с учётом
- * комиссии за вход и выход — closing по стопу не должен уводить сделку в минус), как только
- * позиция ушла в плюс минимум на trading.breakevenTriggerPercent от цены входа.
+ * Периодически проверяет все открытые позиции и переносит стоп-лосс в безубыток+ (с учётом
+ * комиссии за вход и выход — closing по стопу не должен уводить сделку в минус — плюс
+ * небольшой гарантированный доход trading.breakevenExtraProfitPercent сверху, чтобы закрытие
+ * по этому стопу не давало нулевой/минусовой результат даже с учётом реальных условий
+ * исполнения), как только позиция ушла в плюс минимум на trading.breakevenTriggerPercent от
+ * цены входа.
  *
  * Стоп ставится лимитным ордером (дешевле по комиссии), плюс независимый резервный market-SL
  * чуть дальше — на случай, если лимитник не успеет исполниться при резком движении (тот же
@@ -94,9 +97,14 @@ export class BreakevenMonitor {
     ]);
 
     // Безубыток с учётом комиссии: цена, при закрытии по которой (по тейкеру, худший случай)
-    // суммарные издержки на вход и выход не уводят сделку в минус.
+    // суммарные издержки на вход и выход не уводят сделку в минус. Плюс небольшой
+    // гарантированный доход сверху (breakevenExtraProfitPercent) — иначе даже с этим стопом
+    // сделка на практике часто закрывается в небольшой минус (проскальзывание, реальная
+    // комиссия стопа), а не ровно в ноль.
     const roundTripFeeRate = feeRate.takerFeeRate * 2;
-    const breakevenPrice = roundToTick(avgPrice * (1 + sign * roundTripFeeRate), instrument.tickSize);
+    const extraProfitRate = this.config.trading.breakevenExtraProfitPercent / 100;
+    const breakevenDistanceRate = roundTripFeeRate + extraProfitRate;
+    const breakevenPrice = roundToTick(avgPrice * (1 + sign * breakevenDistanceRate), instrument.tickSize);
 
     // Бот всегда ставит SL/TP через setTradingStop в tpslMode "Partial" — под этим режимом
     // Bybit НЕ отражает SL/TP позиции в полях stopLoss/takeProfit самого объекта позиции
@@ -119,8 +127,8 @@ export class BreakevenMonitor {
     // не успеет исполниться при резком движении (тот же приём, что и для основного SL, см.
     // executor.ts). Дистанция от avgPrice до backup — дистанция до breakeven, увеличенная на
     // тот же множитель.
-    const backupFeeRate = roundTripFeeRate * SL_BACKUP_BUFFER_MULTIPLIER;
-    const backupPrice = roundToTick(avgPrice * (1 + sign * backupFeeRate), instrument.tickSize);
+    const backupDistanceRate = breakevenDistanceRate * SL_BACKUP_BUFFER_MULTIPLIER;
+    const backupPrice = roundToTick(avgPrice * (1 + sign * backupDistanceRate), instrument.tickSize);
 
     try {
       // Чистим все условные ордера риск-менеджмента позиции (Partial SL/TP, независимый

@@ -35,6 +35,9 @@ async function main(): Promise<void> {
   const positionLimiter = new PositionRateLimiter(config.trading.maxPositionsPer10Min);
 
   const bybitClient = new BybitClient(config.bybit.testnet);
+  // Держим соединение с Bybit тёплым, чтобы первый замер стакана в OBI-гейте не платил
+  // ~160мс на TCP+TLS (см. BybitClient.startConnectionWarmup / obi/obiEntryGate.ts).
+  bybitClient.startConnectionWarmup();
   // Общая очередь: сериализует доступ к условным ордерам позиции по символу между executor'ом,
   // breakeven- и trailing-мониторами (см. SymbolQueue).
   const symbolQueue = new SymbolQueue();

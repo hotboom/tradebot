@@ -108,16 +108,46 @@ export class BybitClient {
     if (!key || !secret) {
       throw new Error("BYBIT_API_KEY / BYBIT_API_SECRET must be set in environment");
     }
-    // Защита от рассинхрона локальных часов с сервером Bybit (ошибки 10002/10003):
-    // syncTimeBeforePrivateRequests синхронизирует время перед каждым приватным запросом
+    // Время НЕ синхронизируем средствами bybit-api: системные часы VPS держит ntpd (stratum-2,
+    // offset ~1мс, сверено с api.bybit.com — расхождение <100мс). Встроенный time-sync bybit-api
+    // добавляет собственный self-computed offset к Date.now() и периодически промахивался на
+    // 1–2.5с из-за джиттера на своём getServerTime-пробе, что давало интермиттентные 10002
+    // ("req_timestamp > server_time + 1000") на приватных запросах (breakeven/trailing мониторы).
+    // recv_window 10000 оставляем как запас на сетевую задержку. Если ntpd на сервере ляжет и
+    // часы поплывут — приватные запросы начнут падать, это надо мониторить отдельно.
+    //
+    // keepAlive: без него bybit-api не ставит https.Agent с пулом соединений, и каждый REST-запрос
+    // открывает новый TCP+TLS (~160мс с этого VPS до Bybit сверх ~225мс ответа сервера). Критично
+    // для OBI-гейта, который в цикле опрашивает стакан раз в POLL_INTERVAL_MS — см.
+    // src/obi/obiEntryGate.ts. Сокет всё равно остывает в простое между сигналами, поэтому его
+    // держит тёплым startConnectionWarmup() (запускается из server.ts).
     this.rest = new RestClientV5({
       key,
       secret,
       testnet,
-      enable_time_sync: true,
-      syncTimeBeforePrivateRequests: true,
+      enable_time_sync: false,
       recv_window: 10000,
+      keepAlive: true,
+      keepAliveMsecs: 10000,
     });
+  }
+
+  /** Держит TCP+TLS-соединение с Bybit тёплым в простое между сигналами: раз в интервал делает
+   * дешёвый публичный запрос (top-1 стакана BTCUSDT), чтобы к моменту первого замера OBI-гейта
+   * сокет уже был установлен и не пришлось платить ~160мс на connect+handshake. Ошибки
+   * проглатываются — это не критичный путь. Возвращает timer, чтобы вызывающий мог его остановить.
+   * Интервал должен быть меньше времени, за которое Bybit закрывает idle-соединение (~несколько
+   * десятков секунд) — 15с с запасом. */
+  startConnectionWarmup(intervalMs = 15_000): NodeJS.Timeout {
+    const ping = (): void => {
+      this.rest.getOrderbook({ category: "linear", symbol: "BTCUSDT", limit: 1 }).catch(() => {
+        // соединение восстановится на следующем тике / реальном запросе
+      });
+    };
+    ping();
+    const timer = setInterval(ping, intervalMs);
+    timer.unref();
+    return timer;
   }
 
   /** Шаг лота, минимальный объём и шаг цены инструмента (с кэшированием). */

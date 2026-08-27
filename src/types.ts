@@ -72,24 +72,69 @@ export interface TrailingLogEntry {
 /**
  * Фаза OBI-гейта, в которой сделан этот замер (см. src/obi/obiEntryGate.ts):
  * "waiting_extreme" — ждём подтверждения каскада (сильный дисбаланс в сторону сигнала);
- * "waiting_reversal" — экстремум уже увиден, ждём разворота обратно к нейтральному/противоположному.
+ * "waiting_reversal" — экстремум уже увиден, ждём разворота обратно к нейтральному/противоположному;
+ * "post_outcome" — окно гейта уже закрылось (входом или отменой), это пост-трекинг цены/OBI.
  */
-export type ObiGatePhase = "waiting_extreme" | "waiting_reversal";
+export type ObiGatePhase = "waiting_extreme" | "waiting_reversal" | "post_outcome";
 
-export type ObiGateEvent = "sample" | "extreme_seen" | "triggered" | "timeout";
+export type ObiGateEvent =
+  | "sample"
+  | "extreme_seen"
+  | "triggered"
+  | "timeout"
+  | "post_sample"
+  | "post_summary";
+
+/** OBI по срезу топ-N уровней книги (дублирует imbalance.DepthImbalance — вынесено в types,
+ * чтобы ObiLogEntry не зависел от модуля obi/). */
+export interface ObiDepthEntry {
+  depth: number;
+  obi: number;
+}
 
 export interface ObiLogEntry {
   ts: number;
   symbol: string;
   direction: CascadeSignal["direction"];
   signalTimestamp: number;
+  /** Размер сигнала-каскада — прокинут из CascadeSignal, чтобы obi.log был самодостаточен. */
+  signalVolumeUsdt: number;
+  signalOrderCount: number;
   elapsedMs: number;
   obi: number;
+  /** OBI по срезам топ-1/10/50 той же книги (см. imbalance.OBI_DEPTHS). */
+  obiByDepth: ObiDepthEntry[];
   bidVolume: number;
   askVolume: number;
+  /** Цены из того же снапшота стакана. */
+  bestBid: number;
+  bestAsk: number;
+  mid: number;
+  spreadBps: number;
   phase: ObiGatePhase;
   extremeSeen: boolean;
   event: ObiGateEvent;
+  /** Сырой топ книги ([price, size][], лучший первым). Только на событиях extreme_seen /
+   * triggered — на остальных отсутствует, чтобы не раздувать лог. */
+  topBids?: [number, number][];
+  topAsks?: [number, number][];
+  /** Только в записи timeout: экстремумы OBI за окно ожидания и на какой миллисекунде окна они
+   * были достигнуты (насколько близко книга подходила к extremeThreshold), + число валидных замеров. */
+  minObi?: number;
+  minObiAtMs?: number;
+  maxObi?: number;
+  maxObiAtMs?: number;
+  sampleCount?: number;
+  /** Только в записях post_sample / post_summary: чем закончился гейт по этому сигналу. */
+  postOutcome?: "triggered" | "timeout";
+  /** Только в записи post_summary: mid в момент исхода (точка отсчёта) и экскурсии цены после
+   * него в базисных пунктах, знак — относительно направления ожидавшегося отскока (для LONG
+   * благоприятен рост, для SHORT — падение). mfeBps >= 0, maeBps <= 0. */
+  refMid?: number;
+  mfeBps?: number;
+  maeBps?: number;
+  postDurationMs?: number;
+  postSampleCount?: number;
 }
 
 export interface OrderLogEntry {

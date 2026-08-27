@@ -6,7 +6,7 @@ import type { CascadeSignal, OrderSide } from "./types";
 import { resolveOrderSide } from "./decision/filters";
 import { calcExitPrices, SL_BACKUP_BUFFER_MULTIPLIER } from "./decision/exits";
 import { chaseLimitEntry } from "./bybit/limitChaseEntry";
-import { waitForObiReversal } from "./obi/obiEntryGate";
+import { waitForObiReversal, trackObiAfterOutcome } from "./obi/obiEntryGate";
 import { roundDownToStep, roundToTick } from "./util/rounding";
 import type { BreakevenMonitor } from "./breakevenMonitor";
 import type { TrailingStopMonitor } from "./trailingStopMonitor";
@@ -56,6 +56,18 @@ export class OrderExecutor {
       // трогает условные ордера позиции и не должно блокировать другие символы или блокироваться
       // тиками breakeven/trailing-мониторов по этому же символу.
       const gate = await waitForObiReversal(this.client, this.obiLogger, signal, this.config.trading.obi);
+
+      // Пост-трекинг цены/OBI ещё ~2 мин после исхода — и после входа, и после отмены — для
+      // разбора качества фильтра постфактум (см. trackObiAfterOutcome). Detached: не блокирует
+      // вход и обработку других сигналов, наружу не бросает.
+      void trackObiAfterOutcome(
+        this.client,
+        this.obiLogger,
+        signal,
+        gate.triggered ? "triggered" : "timeout",
+        gate.triggered ? true : gate.extremeSeen,
+        gate.mid
+      ).catch(() => undefined);
 
       if (!gate.triggered) {
         this.logCancelled(

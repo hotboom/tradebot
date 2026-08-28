@@ -144,48 +144,80 @@ export class OrderExecutor {
       return;
     }
 
-    // Шаг 2 (вне критического пути): выставляем SL/TP на открытую позицию отдельным запросом.
+    // Шаг 2 (вне критического пути): SL ставим на позицию через setTradingStop, TP — отдельным
+    // reduce-only лимитным ордером (один ценник, виден в стакане, свободно двигается вручную в
+    // приложении/на графике, в отличие от TP через setTradingStop с парой trigger/limit).
     if (sl !== null || tp !== null) {
+      const closingSide: OrderSide = side === "Buy" ? "Sell" : "Buy";
       const preferLimitSl = sl !== null && this.config.trading.stopLossOrderType === "limit";
       let appliedSlOrderType: "Market" | "Limit" | null = sl !== null ? (preferLimitSl ? "Limit" : "Market") : null;
 
-      // Все старые условные ордера риск-менеджмента этой позиции (Partial SL/TP от
-      // setTradingStop + независимый backup-SL) чистим безусловно перед пересозданием —
-      // setTradingStop в tpslMode: "Partial" не заменяет предыдущие partial-ордера при
-      // повторном вызове, а добавляет новые поверх (подтверждено на боевом аккаунте) — без
-      // явной отмены на бирже копятся дублирующиеся SL/TP с устаревшими qty/ценой.
+      // Старые ордера риск-менеджмента этой позиции чистим перед пересозданием (актуально при
+      // повторном входе по символу): условные (Partial SL от setTradingStop + независимый
+      // backup-SL — setTradingStop в tpslMode "Partial" не заменяет предыдущие partial-ордера,
+      // а добавляет новые поверх) и обычный reduce-only лимитный TP (его размер/цену
+      // пересоздаём под новый объём позиции).
       let cleanupError: string | null = null;
+      const noteCleanupError = (err: unknown): void => {
+        const msg = err instanceof Error ? err.message : String(err);
+        cleanupError = cleanupError ? `${cleanupError}; ${msg}` : msg;
+      };
       try {
         const staleOrders = await this.client.getOpenStopOrders(signal.symbol);
         for (const staleOrder of staleOrders) {
           await this.client.cancelOrder({ symbol: signal.symbol, orderId: staleOrder.orderId });
         }
       } catch (err) {
-        cleanupError = err instanceof Error ? err.message : String(err);
+        noteCleanupError(err);
+      }
+      try {
+        const staleTpOrders = await this.client.getOpenReduceOnlyLimitOrders(signal.symbol);
+        for (const staleTp of staleTpOrders) {
+          await this.client.cancelOrder({ symbol: signal.symbol, orderId: staleTp.orderId });
+        }
+      } catch (err) {
+        noteCleanupError(err);
       }
 
-      try {
-        await this.client.setTradingStop({
-          symbol: signal.symbol,
-          qty: positionQty as number,
-          stopLoss: sl,
-          stopLossOrderType: appliedSlOrderType ?? "Market",
-          takeProfit: tp,
-        });
-      } catch (err) {
-        // Лимитный SL не встал (например, недостаточно ликвидности по цене) — пробуем
-        // обычный маркет SL, чтобы не остаться без защиты позиции.
-        if (preferLimitSl) {
-          appliedSlOrderType = "Market";
-          try {
-            await this.client.setTradingStop({
-              symbol: signal.symbol,
-              qty: positionQty as number,
-              stopLoss: sl,
-              stopLossOrderType: "Market",
-              takeProfit: tp,
-            });
-          } catch (fallbackErr) {
+      // SL на позицию.
+      if (sl !== null) {
+        try {
+          await this.client.setTradingStop({
+            symbol: signal.symbol,
+            qty: positionQty as number,
+            stopLoss: sl,
+            stopLossOrderType: appliedSlOrderType ?? "Market",
+          });
+        } catch (err) {
+          // Лимитный SL не встал (например, недостаточно ликвидности по цене) — пробуем
+          // обычный маркет SL, чтобы не остаться без защиты позиции.
+          if (preferLimitSl) {
+            appliedSlOrderType = "Market";
+            try {
+              await this.client.setTradingStop({
+                symbol: signal.symbol,
+                qty: positionQty as number,
+                stopLoss: sl,
+                stopLossOrderType: "Market",
+              });
+            } catch (fallbackErr) {
+              this.ordersLogger.log({
+                symbol: signal.symbol,
+                side,
+                qty,
+                entryPriceRef,
+                refMarketPrice,
+                sl,
+                slOrderType: null,
+                slBackupPrice: null,
+                tp,
+                status: "failed",
+                bybitOrderId: orderId,
+                error: `SL not set (limit SL failed: ${err instanceof Error ? err.message : String(err)}; market SL fallback failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)})`,
+              });
+              return;
+            }
+          } else {
             this.ordersLogger.log({
               symbol: signal.symbol,
               side,
@@ -198,26 +230,10 @@ export class OrderExecutor {
               tp,
               status: "failed",
               bybitOrderId: orderId,
-              error: `SL/TP not set (limit SL failed: ${err instanceof Error ? err.message : String(err)}; market SL fallback failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)})`,
+              error: `SL not set: ${err instanceof Error ? err.message : String(err)}`,
             });
             return;
           }
-        } else {
-          this.ordersLogger.log({
-            symbol: signal.symbol,
-            side,
-            qty,
-            entryPriceRef,
-            refMarketPrice,
-            sl,
-            slOrderType: null,
-            slBackupPrice: null,
-            tp,
-            status: "failed",
-            bybitOrderId: orderId,
-            error: `SL/TP not set: ${err instanceof Error ? err.message : String(err)}`,
-          });
-          return;
         }
       }
 
@@ -227,7 +243,6 @@ export class OrderExecutor {
       let backupPlaced = false;
       let backupOrderError: string | null = null;
       if (appliedSlOrderType === "Limit" && slBackup !== null) {
-        const closingSide: OrderSide = side === "Buy" ? "Sell" : "Buy";
         const triggerDirection: 1 | 2 = side === "Buy" ? 2 : 1;
         try {
           await this.client.submitStopMarketOrder({
@@ -243,12 +258,30 @@ export class OrderExecutor {
         }
       }
 
+      // TP — отдельным reduce-only лимитником на весь текущий объём позиции.
+      let tpPlaced = false;
+      let tpOrderError: string | null = null;
+      if (tp !== null) {
+        try {
+          await this.client.submitTakeProfitLimitOrder({
+            symbol: signal.symbol,
+            side: closingSide,
+            qty: positionQty as number,
+            price: tp,
+          });
+          tpPlaced = true;
+        } catch (err) {
+          tpOrderError = err instanceof Error ? err.message : String(err);
+        }
+      }
+
       const notes = [
         preferLimitSl && appliedSlOrderType === "Market" ? "limit SL rejected, fell back to market SL" : null,
-        cleanupError ? `stale SL/TP cleanup failed: ${cleanupError}` : null,
+        cleanupError ? `stale order cleanup failed: ${cleanupError}` : null,
         appliedSlOrderType === "Limit" && slBackup !== null && !backupPlaced
           ? `backup market SL not set: ${backupOrderError}`
           : null,
+        tp !== null && !tpPlaced ? `TP limit order not set: ${tpOrderError}` : null,
       ].filter((note): note is string => note !== null);
 
       this.ordersLogger.log({

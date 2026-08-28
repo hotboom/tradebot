@@ -20,7 +20,6 @@ export interface TradingStopParams {
   qty: number;
   stopLoss?: number | null;
   stopLossOrderType?: "Market" | "Limit";
-  takeProfit?: number | null;
 }
 
 export interface StopMarketOrderParams {
@@ -43,6 +42,13 @@ export interface LimitOrderParams {
   side: OrderSide;
   qty: number;
   price: number;
+}
+
+export interface OpenLimitOrder {
+  orderId: string;
+  side: OrderSide;
+  price: number;
+  qty: number;
 }
 
 export interface AmendOrderParams {
@@ -315,10 +321,14 @@ export class BybitClient {
     return res.result.orderId;
   }
 
-  /** Выставление SL/TP на уже открытую позицию (отдельным запросом после входа).
+  /** Выставление SL на уже открытую позицию (отдельным запросом после входа).
    * SL по умолчанию — Market (гарантированное исполнение при резком движении), может быть
    * переключён на Limit (меньше комиссия, ценой риска не исполниться на резком движении).
-   * TP — Limit (меньше комиссия и без проскальзывания, ценой риска не исполниться на "фитиле"). */
+   * TP через этот вызов НЕ ставим: он живёт отдельным reduce-only лимитным ордером
+   * (submitTakeProfitLimitOrder) — с одним ценником, который видно в стакане и который можно
+   * свободно двигать вручную в приложении/на графике, в отличие от TP через setTradingStop
+   * с его парой triggerPrice/tpLimitPrice, из которых редактор позиции Bybit меняет только
+   * триггер и легко получить рассинхрон. */
   async setTradingStop(params: TradingStopParams): Promise<void> {
     const body: Record<string, string | number> = {
       category: "linear",
@@ -336,13 +346,6 @@ export class BybitClient {
         body.slLimitPrice = String(params.stopLoss);
       }
     }
-    if (params.takeProfit != null) {
-      body.takeProfit = String(params.takeProfit);
-      body.tpSize = String(params.qty);
-      body.tpOrderType = "Limit";
-      body.tpLimitPrice = String(params.takeProfit);
-    }
-
     const res = await this.rest.setTradingStop(body as never);
     if (res.retCode !== 0) {
       throw new Error(`setTradingStop failed: ${res.retCode} ${res.retMsg}`);
@@ -407,6 +410,49 @@ export class BybitClient {
     return res.result.orderId;
   }
 
+  /** Take-profit позиции как отдельный reduce-only лимитный ордер (а не через setTradingStop).
+   * one-way mode: reduce-only гарантирует, что ордер только сокращает/закрывает позицию, а не
+   * открывает встречную, поэтому в one-way обычная лимитка на противоположной стороне работает
+   * как TP. GTC, не PostOnly: на момент постановки TP всегда далеко от рынка (резидентный
+   * лимитник и так исполнится как maker), а гарантия, что ордер вообще встал, тут важнее
+   * гарантии maker-комиссии — PostOnly может асинхронно отклониться на пересечённой цене. */
+  async submitTakeProfitLimitOrder(params: LimitOrderParams): Promise<string> {
+    const res = await this.rest.submitOrder({
+      category: "linear",
+      symbol: params.symbol,
+      side: params.side,
+      orderType: "Limit",
+      qty: String(params.qty),
+      price: String(params.price),
+      timeInForce: "GTC",
+      reduceOnly: true,
+      positionIdx: 0,
+    } as never);
+    if (res.retCode !== 0) {
+      throw new Error(`submitOrder (TP limit) failed: ${res.retCode} ${res.retMsg}`);
+    }
+    return res.result.orderId;
+  }
+
+  /** Резидентные обычные (не условные) reduce-only лимитные ордера по символу — наш
+   * take-profit (submitTakeProfitLimitOrder). Отделены от условных ордеров риск-менеджмента
+   * (getOpenStopOrders, orderFilter "StopOrder"): тут orderFilter "Order". Нужны, чтобы при
+   * повторном входе по символу снять старый TP и переставить его на новый объём/цену. */
+  async getOpenReduceOnlyLimitOrders(symbol: string): Promise<OpenLimitOrder[]> {
+    const res = await this.rest.getActiveOrders({ category: "linear", symbol, orderFilter: "Order" });
+    if (res.retCode !== 0) {
+      throw new Error(`getActiveOrders (Order) failed: ${res.retCode} ${res.retMsg}`);
+    }
+    return (res.result.list ?? [])
+      .filter((o) => o.reduceOnly === true && o.orderType === "Limit")
+      .map((o) => ({
+        orderId: o.orderId,
+        side: o.side === "Sell" ? "Sell" : "Buy",
+        price: Number(o.price),
+        qty: Number(o.qty),
+      }));
+  }
+
   /** Репрайс резидентного лимитного ордера при чейзинге. Возвращает "gone" вместо throw, если
    * ордер уже исполнился/пропал между опросом статуса и этим вызовом — ожидаемая гонка, не ошибка. */
   async amendOrder(params: AmendOrderParams): Promise<"amended" | "gone"> {
@@ -435,18 +481,19 @@ export class BybitClient {
   }
 
   /** Все наши условные ордера риск-менеджмента позиции, резидентные на бирже для символа:
-   * и независимый backup-SL (submitStopMarketOrder, stopOrderType "Stop"), и Partial SL/TP
-   * самой позиции (созданные через setTradingStop, stopOrderType "PartialStopLoss"/
-   * "PartialTakeProfit"). Важно (проверено на боевом аккаунте, живая позиция BTCUSDT):
-   * повторный вызов setTradingStop в tpslMode: "Partial" НЕ заменяет предыдущие partial-ордера,
-   * а создаёт новую пару поверх — без явной отмены старых на бирже копятся дублирующиеся SL/TP
-   * с устаревшими qty/ценой. Поэтому перед каждым пересозданием чистим здесь всё разом.
+   * независимый backup-SL (submitStopMarketOrder, stopOrderType "Stop") и Partial SL самой
+   * позиции (setTradingStop, stopOrderType "PartialStopLoss"). Может также вернуть легаси
+   * "PartialTakeProfit" у позиций, открытых до перехода на лимитный TP — вызывающий код такие
+   * ордера не трогает (TP теперь отдельный reduce-only лимитник, см. getOpenReduceOnlyLimitOrders).
+   * Важно (проверено на боевом аккаунте): повторный вызов setTradingStop в tpslMode "Partial"
+   * НЕ заменяет предыдущий partial-ордер, а создаёт новый поверх — без явной отмены старых на
+   * бирже копятся дублирующиеся SL с устаревшими qty/ценой. Поэтому перед каждым пересозданием
+   * чистим здесь всё разом.
    *
    * Возвращает не только orderId, но и stopOrderType/triggerPrice каждого ордера: в tpslMode
-   * "Partial" SL/TP самой позиции НЕ отражаются в полях stopLoss/takeProfit объекта позиции
-   * (getPositionInfo) — это независимые резидентные ордера, поэтому единственный надёжный
-   * способ узнать, что уже стоит на бирже (и не переставлять его без необходимости) —
-   * посмотреть на сами эти ордера. */
+   * "Partial" SL самой позиции НЕ отражается в поле stopLoss объекта позиции (getPositionInfo) —
+   * это независимый резидентный ордер, поэтому единственный надёжный способ узнать, что уже
+   * стоит на бирже (и не переставлять его без необходимости) — посмотреть на сами эти ордера. */
   async getOpenStopOrders(symbol: string): Promise<OpenStopOrder[]> {
     const res = await this.rest.getActiveOrders({ category: "linear", symbol, orderFilter: "StopOrder" });
     if (res.retCode !== 0) {

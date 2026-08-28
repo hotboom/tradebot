@@ -48,6 +48,19 @@ async function main(): Promise<void> {
 
   const app = Fastify({ logger: true });
 
+  // Прогрев перед приёмом сигналов: (1) заранее открываем и держим горячим keep-alive
+  // соединение до Bybit, (2) заполняем кэш метаданных всех linear-инструментов одним bulk-
+  // запросом. Оба сокращают латентность первого (и любого редкого) входа — см. BybitClient.
+  try {
+    await bybitClient.warmUpConnection();
+    const instrumentCount = await bybitClient.preloadInstruments();
+    app.log.info({ instrumentCount }, "bybit connection warmed up and instrument cache preloaded");
+  } catch (err) {
+    app.log.warn({ err }, "bybit warmup/instrument preload failed, continuing with lazy per-symbol load");
+  }
+  bybitClient.startConnectionKeepAlive();
+  bybitClient.startInstrumentRefresh();
+
   app.post("/signal/liquidation", async (request, reply) => {
     const parsed = cascadeSignalSchema.safeParse(request.body);
     if (!parsed.success) {

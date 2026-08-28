@@ -91,10 +91,21 @@ function isOrderGoneRetCode(retCode: number, retMsg: string): boolean {
   return /order not exists|not exist|has been filled|has been (cancell?ed)|too late to cancel/i.test(retMsg);
 }
 
+/** Как часто дёргаем дешёвый публичный эндпоинт, чтобы keep-alive сокет до api.bybit.com не
+ * успевал протухнуть по idle-таймауту балансировщика/NAT между редкими сигналами. Пул греется
+ * по хосту, а не по символу — один горячий сокет обслуживает любой последующий запрос. */
+const CONNECTION_KEEPALIVE_MS = 20_000;
+/** Периодическое обновление кэша инструментов (tickSize/qtyStep практически не меняются). */
+const INSTRUMENT_REFRESH_MS = 6 * 60 * 60 * 1_000;
+/** Лимит страницы getInstrumentsInfo (максимум, поддерживаемый Bybit для linear). */
+const INSTRUMENTS_PAGE_LIMIT = 1_000;
+
 export class BybitClient {
   private readonly rest: RestClientV5;
   private readonly instrumentCache = new Map<string, InstrumentInfo>();
   private readonly feeRateCache = new Map<string, FeeRate>();
+  private keepAliveTimer: NodeJS.Timeout | null = null;
+  private instrumentRefreshTimer: NodeJS.Timeout | null = null;
 
   constructor(testnet: boolean) {
     const key = process.env.BYBIT_API_KEY;
@@ -109,13 +120,82 @@ export class BybitClient {
     // server_time + 1000") на приватных запросах. recv_window 10000 оставляем как запас на
     // сетевую задержку. Если ntpd на сервере ляжет и часы поплывут — приватные запросы начнут
     // падать, это надо мониторить отдельно.
+    // keepAlive: переиспользуем TCP+TLS-соединение до api.bybit.com между запросами. Без него
+    // bybit-api (axios) на каждый вызов делает полный хендшейк — с сервера далеко от Сингапура
+    // это ~2 RTT (сотни мс) поверх самого запроса, на каждом ордере/чтении позиции в горячем
+    // пути входа. keepAliveMsecs держим равным типичному idle-таймауту, warmup ниже не даёт
+    // сокету простаивать дольше.
     this.rest = new RestClientV5({
       key,
       secret,
       testnet,
       enable_time_sync: false,
       recv_window: 10000,
+      keepAlive: true,
+      keepAliveMsecs: 60_000,
     });
+  }
+
+  /** Держит keep-alive соединение до Bybit горячим: раз в CONNECTION_KEEPALIVE_MS дёргает
+   * дешёвый публичный getServerTime, чтобы к моменту сигнала не платить за новый хендшейк.
+   * Идемпотентно. Ошибки глушим — это лишь прогрев, реальные запросы отвалятся по-своему. */
+  startConnectionKeepAlive(intervalMs: number = CONNECTION_KEEPALIVE_MS): void {
+    if (this.keepAliveTimer) return;
+    this.keepAliveTimer = setInterval(() => {
+      this.rest.getServerTime().catch((err: unknown) => {
+        console.error("[bybit] connection keep-alive ping failed:", err instanceof Error ? err.message : err);
+      });
+    }, intervalMs);
+    this.keepAliveTimer.unref();
+  }
+
+  /** Разовый синхронный прогрев соединения — вызвать на старте до первого сигнала. */
+  async warmUpConnection(): Promise<void> {
+    await this.rest.getServerTime();
+  }
+
+  /** Загружает метаданные ВСЕХ торгуемых linear-инструментов одним-двумя bulk-запросами и
+   * заполняет instrumentCache. Нужно, чтобы первый в жизни процесса сигнал по редкому символу
+   * не платил за отдельный getInstrumentsInfo(symbol) в горячем пути входа. Возвращает число
+   * закэшированных символов. */
+  async preloadInstruments(): Promise<number> {
+    let cursor: string | undefined;
+    let loaded = 0;
+    do {
+      const res = await this.rest.getInstrumentsInfo({
+        category: "linear",
+        limit: INSTRUMENTS_PAGE_LIMIT,
+        ...(cursor ? { cursor } : {}),
+      });
+      if (res.retCode !== 0) {
+        throw new Error(`getInstrumentsInfo (bulk) failed: ${res.retCode} ${res.retMsg}`);
+      }
+      for (const item of res.result.list ?? []) {
+        if (item.status !== "Trading") continue;
+        const qtyStep = Number(item.lotSizeFilter?.qtyStep);
+        const minOrderQty = Number(item.lotSizeFilter?.minOrderQty);
+        const tickSize = Number(item.priceFilter?.tickSize);
+        if (!Number.isFinite(qtyStep) || !Number.isFinite(minOrderQty) || !Number.isFinite(tickSize)) {
+          continue;
+        }
+        this.instrumentCache.set(item.symbol, { qtyStep, minOrderQty, tickSize });
+        loaded += 1;
+      }
+      cursor = res.result.nextPageCursor || undefined;
+    } while (cursor);
+    return loaded;
+  }
+
+  /** Периодически обновляет кэш инструментов в фоне. Идемпотентно. Сбой одного прогона не
+   * критичен — в кэше остаются прошлые значения, а getInstrumentInfo умеет дозагрузить сам. */
+  startInstrumentRefresh(intervalMs: number = INSTRUMENT_REFRESH_MS): void {
+    if (this.instrumentRefreshTimer) return;
+    this.instrumentRefreshTimer = setInterval(() => {
+      this.preloadInstruments().catch((err: unknown) => {
+        console.error("[bybit] instrument cache refresh failed:", err instanceof Error ? err.message : err);
+      });
+    }, intervalMs);
+    this.instrumentRefreshTimer.unref();
   }
 
   /** Шаг лота, минимальный объём и шаг цены инструмента (с кэшированием). */

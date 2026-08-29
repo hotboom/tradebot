@@ -97,10 +97,16 @@ function isOrderGoneRetCode(retCode: number, retMsg: string): boolean {
   return /order not exists|not exist|has been filled|has been (cancell?ed)|too late to cancel/i.test(retMsg);
 }
 
+/** Периодическое обновление кэша инструментов (tickSize/qtyStep практически не меняются). */
+const INSTRUMENT_REFRESH_MS = 6 * 60 * 60 * 1_000;
+/** Лимит страницы getInstrumentsInfo (максимум, поддерживаемый Bybit для linear). */
+const INSTRUMENTS_PAGE_LIMIT = 1_000;
+
 export class BybitClient {
   private readonly rest: RestClientV5;
   private readonly instrumentCache = new Map<string, InstrumentInfo>();
   private readonly feeRateCache = new Map<string, FeeRate>();
+  private instrumentRefreshTimer: NodeJS.Timeout | null = null;
 
   constructor(testnet: boolean) {
     const key = process.env.BYBIT_API_KEY;
@@ -170,6 +176,50 @@ export class BybitClient {
     };
     this.instrumentCache.set(symbol, info);
     return info;
+  }
+
+  /** Загружает метаданные ВСЕХ торгуемых linear-инструментов одним-двумя bulk-запросами и
+   * заполняет instrumentCache. Нужно, чтобы первый в жизни процесса сигнал по редкому символу
+   * не платил за отдельный getInstrumentsInfo(symbol) в горячем пути входа при расчёте объёма
+   * ордера. Возвращает число закэшированных символов. */
+  async preloadInstruments(): Promise<number> {
+    let cursor: string | undefined;
+    let loaded = 0;
+    do {
+      const res = await this.rest.getInstrumentsInfo({
+        category: "linear",
+        limit: INSTRUMENTS_PAGE_LIMIT,
+        ...(cursor ? { cursor } : {}),
+      });
+      if (res.retCode !== 0) {
+        throw new Error(`getInstrumentsInfo (bulk) failed: ${res.retCode} ${res.retMsg}`);
+      }
+      for (const item of res.result.list ?? []) {
+        if (item.status !== "Trading") continue;
+        const qtyStep = Number(item.lotSizeFilter?.qtyStep);
+        const minOrderQty = Number(item.lotSizeFilter?.minOrderQty);
+        const tickSize = Number(item.priceFilter?.tickSize);
+        if (!Number.isFinite(qtyStep) || !Number.isFinite(minOrderQty) || !Number.isFinite(tickSize)) {
+          continue;
+        }
+        this.instrumentCache.set(item.symbol, { qtyStep, minOrderQty, tickSize });
+        loaded += 1;
+      }
+      cursor = res.result.nextPageCursor || undefined;
+    } while (cursor);
+    return loaded;
+  }
+
+  /** Периодически обновляет кэш инструментов в фоне. Идемпотентно. Сбой одного прогона не
+   * критичен — в кэше остаются прошлые значения, а getInstrumentInfo умеет дозагрузить сам. */
+  startInstrumentRefresh(intervalMs: number = INSTRUMENT_REFRESH_MS): void {
+    if (this.instrumentRefreshTimer) return;
+    this.instrumentRefreshTimer = setInterval(() => {
+      this.preloadInstruments().catch((err: unknown) => {
+        console.error("[bybit] instrument cache refresh failed:", err instanceof Error ? err.message : err);
+      });
+    }, intervalMs);
+    this.instrumentRefreshTimer.unref();
   }
 
   /** Последняя цена тикера. */

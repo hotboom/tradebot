@@ -68,6 +68,18 @@ async function main(): Promise<void> {
 
   const app = Fastify({ logger: true });
 
+  // Заполняем кэш метаданных всех linear-инструментов одним bulk-запросом до приёма сигналов,
+  // чтобы расчёт объёма ордера в горячем пути входа не платил за отдельный
+  // getInstrumentsInfo(symbol) — особенно на первом (и любом редком) символе. Ошибка не
+  // критична: getInstrumentInfo дозагрузит символ лениво (см. BybitClient.preloadInstruments).
+  try {
+    const instrumentCount = await bybitClient.preloadInstruments();
+    app.log.info({ instrumentCount }, "bybit instrument cache preloaded");
+  } catch (err) {
+    app.log.warn({ err }, "bybit instrument preload failed, continuing with lazy per-symbol load");
+  }
+  bybitClient.startInstrumentRefresh();
+
   app.post("/signal/liquidation", async (request, reply) => {
     const parsed = cascadeSignalSchema.safeParse(request.body);
     if (!parsed.success) {

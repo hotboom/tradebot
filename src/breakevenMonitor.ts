@@ -108,15 +108,13 @@ export class BreakevenMonitor {
     const breakevenDistanceRate = roundTripFeeRate + extraProfitRate;
     const breakevenPrice = roundToTick(avgPrice * (1 + sign * breakevenDistanceRate), instrument.tickSize);
 
-    // Бот всегда ставит SL/TP через setTradingStop в tpslMode "Partial" — под этим режимом
-    // Bybit НЕ отражает SL/TP позиции в полях stopLoss/takeProfit самого объекта позиции
-    // (getPositionInfo), они существуют только как независимые резидентные ордера
-    // (stopOrderType "PartialStopLoss"/"PartialTakeProfit"). Поэтому сверяемся с этими
-    // ордерами напрямую, а не с position.stopLoss/position.takeProfit — иначе бот не видит
-    // свой же ранее выставленный стоп и пересоздаёт его на каждом тике.
+    // Бот ставит SL через setTradingStop в tpslMode "Partial" — под этим режимом Bybit НЕ
+    // отражает SL позиции в поле stopLoss самого объекта позиции (getPositionInfo), он
+    // существует только как независимый резидентный ордер (stopOrderType "PartialStopLoss").
+    // Поэтому сверяемся с этим ордером напрямую, а не с position.stopLoss — иначе бот не видит
+    // свой же ранее выставленный стоп и пересоздаёт его на каждом тике. TP живёт отдельным
+    // reduce-only лимитником (не condition-ордер) — этот монитор его не касается.
     const existingSl = stopOrders.find((o) => o.stopOrderType === "PartialStopLoss");
-    const existingTp = stopOrders.find((o) => o.stopOrderType === "PartialTakeProfit");
-    const currentTakeProfit = existingTp ? existingTp.triggerPrice : null;
 
     // Стоп уже на безубытке или лучше — не отодвигаем его назад и не дёргаем биржу зря на
     // каждом тике.
@@ -133,16 +131,18 @@ export class BreakevenMonitor {
     const backupPrice = roundToTick(avgPrice * (1 + sign * backupDistanceRate), instrument.tickSize);
 
     try {
-      // Чистим все условные ордера риск-менеджмента позиции (Partial SL/TP, независимый
-      // backup-SL) перед пересозданием — см. комментарий к getOpenStopOrders в bybit/client.ts:
-      // повторный setTradingStop не заменяет старые partial-ордера, а добавляет новые поверх.
+      // Чистим условные ордера риск-менеджмента позиции (Partial SL, независимый backup-SL)
+      // перед пересозданием — см. комментарий к getOpenStopOrders в bybit/client.ts: повторный
+      // setTradingStop не заменяет старый partial-ордер, а добавляет новый поверх. Легаси
+      // PartialTakeProfit (у позиций, открытых до перехода на лимитный TP) НЕ трогаем — TP
+      // теперь отдельный reduce-only лимитник, этот монитор им не управляет.
       for (const order of stopOrders) {
+        if (order.stopOrderType === "PartialTakeProfit") continue;
         await this.client.cancelOrder({ symbol, orderId: order.orderId });
       }
 
       // SL — лимитным ордером (maker-комиссия), с фоллбэком на market, если лимитник вообще не
-      // встал (например, недостаточно ликвидности по цене). TP (если был выставлен) переносим
-      // на прежнюю цену — этот шаг его не меняет.
+      // встал (например, недостаточно ликвидности по цене).
       let appliedSlOrderType: "Limit" | "Market" = "Limit";
       let limitFallbackReason: string | null = null;
       try {
@@ -151,7 +151,6 @@ export class BreakevenMonitor {
           qty: size,
           stopLoss: breakevenPrice,
           stopLossOrderType: "Limit",
-          takeProfit: currentTakeProfit,
         });
       } catch (err) {
         appliedSlOrderType = "Market";
@@ -161,7 +160,6 @@ export class BreakevenMonitor {
           qty: size,
           stopLoss: breakevenPrice,
           stopLossOrderType: "Market",
-          takeProfit: currentTakeProfit,
         });
       }
 

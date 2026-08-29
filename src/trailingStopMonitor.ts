@@ -97,12 +97,10 @@ export class TrailingStopMonitor {
     // вести trailing-stop.
     const candidatePrice = roundToTick(markPrice * (1 - sign * trailingDistance), instrument.tickSize);
 
-    // См. комментарий в breakevenMonitor.ts про tpslMode "Partial": SL/TP позиции видны только
-    // как независимые резидентные ордера (stopOrderType "PartialStopLoss"/"PartialTakeProfit"),
-    // а не в полях position.stopLoss/position.takeProfit.
+    // См. комментарий в breakevenMonitor.ts про tpslMode "Partial": SL позиции виден только
+    // как независимый резидентный ордер (stopOrderType "PartialStopLoss"), а не в поле
+    // position.stopLoss. TP живёт отдельным reduce-only лимитником — этот монитор его не трогает.
     const existingSl = stopOrders.find((o) => o.stopOrderType === "PartialStopLoss");
-    const existingTp = stopOrders.find((o) => o.stopOrderType === "PartialTakeProfit");
-    const currentTakeProfit = existingTp ? existingTp.triggerPrice : null;
 
     // Подтягиваем стоп только в сторону прибыли — если цена откатилась против позиции,
     // кандидат хуже уже выставленного стопа, и мы его не трогаем.
@@ -117,9 +115,12 @@ export class TrailingStopMonitor {
     );
 
     try {
-      // Чистим все условные ордера риск-менеджмента позиции перед пересозданием — см.
-      // комментарий к getOpenStopOrders в bybit/client.ts.
+      // Чистим условные ордера риск-менеджмента позиции (Partial SL, backup-SL) перед
+      // пересозданием — см. комментарий к getOpenStopOrders в bybit/client.ts. Легаси
+      // PartialTakeProfit (позиции до перехода на лимитный TP) НЕ трогаем — TP теперь отдельный
+      // reduce-only лимитник, этот монитор им не управляет.
       for (const order of stopOrders) {
+        if (order.stopOrderType === "PartialTakeProfit") continue;
         await this.client.cancelOrder({ symbol, orderId: order.orderId });
       }
 
@@ -131,7 +132,6 @@ export class TrailingStopMonitor {
           qty: size,
           stopLoss: candidatePrice,
           stopLossOrderType: "Limit",
-          takeProfit: currentTakeProfit,
         });
       } catch (err) {
         appliedSlOrderType = "Market";
@@ -141,7 +141,6 @@ export class TrailingStopMonitor {
           qty: size,
           stopLoss: candidatePrice,
           stopLossOrderType: "Market",
-          takeProfit: currentTakeProfit,
         });
       }
 

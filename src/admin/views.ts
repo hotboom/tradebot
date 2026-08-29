@@ -227,6 +227,10 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
           <input class="form-control" id="maxPositionsPer10Min" name="maxPositionsPer10Min" value="${escapeHtml(values.maxPositionsPer10Min)}" inputmode="numeric" required>
         </div>
         <div class="col-md-6">
+          ${labelWithHelp("symbolCooldownSec", "Symbol cooldown (sec)", "After a signal for a symbol is accepted and dispatched, further signals for that same symbol are ignored (logged as rejected symbol_cooldown) for this many seconds. Collapses the bursts of near-duplicate signals the upstream scanner emits for one symbol within seconds (each with a slightly different timestamp, so plain dedup misses them). 0 disables. In-memory, reset on restart.")}
+          <input class="form-control" id="symbolCooldownSec" name="symbolCooldownSec" value="${escapeHtml(values.symbolCooldownSec)}" inputmode="decimal" required>
+        </div>
+        <div class="col-md-6">
           ${labelWithHelp("direction", "Direction", "Which liquidation-cascade signals to trade. Signals in the other direction are logged but ignored.")}
           <select class="form-select" id="direction" name="direction">
             <option value="both" ${values.direction === "both" ? "selected" : ""}>Both (long & short)</option>

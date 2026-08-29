@@ -18,6 +18,7 @@ const configSchema = z.object({
     stopLossOrderType: z.enum(["market", "limit"]).nullish().transform((v) => v ?? "market"),
     takeProfitPercent: z.number().positive().nullish().transform((v) => v ?? null),
     maxPositionsPer10Min: z.number().int().positive(),
+    symbolCooldownSec: z.number().nonnegative().nullish().transform((v) => v ?? 90),
     direction: z.enum(["both", "long", "short"]).default("both"),
     breakevenEnabled: z.boolean().nullish().transform((v) => v ?? false),
     breakevenTriggerPercent: z.number().positive().nullish().transform((v) => v ?? 1),

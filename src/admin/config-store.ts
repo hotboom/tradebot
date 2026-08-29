@@ -17,6 +17,7 @@ export type EnvFormValues = {
   stopLossOrderType: string;
   takeProfitPercent: string;
   maxPositionsPer10Min: string;
+  symbolCooldownSec: string;
   direction: string;
   breakevenEnabled: boolean;
   breakevenTriggerPercent: string;
@@ -59,6 +60,7 @@ type TradingConfig = {
     stopLossOrderType: "market" | "limit";
     takeProfitPercent: number | null;
     maxPositionsPer10Min: number;
+    symbolCooldownSec: number;
     direction: "both" | "long" | "short";
     breakevenEnabled: boolean;
     breakevenTriggerPercent: number;
@@ -239,6 +241,7 @@ export async function loadEnv(): Promise<LoadedEnv> {
       stopLossOrderType: config.trading.stopLossOrderType ?? "market",
       takeProfitPercent: config.trading.takeProfitPercent !== null ? String(config.trading.takeProfitPercent) : "",
       maxPositionsPer10Min: String(config.trading.maxPositionsPer10Min),
+      symbolCooldownSec: String(config.trading.symbolCooldownSec ?? 90),
       direction: config.trading.direction ?? "both",
       breakevenEnabled: config.trading.breakevenEnabled ?? false,
       breakevenTriggerPercent: String(config.trading.breakevenTriggerPercent ?? 1),
@@ -293,6 +296,7 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
   const stopLossOrderType = parseStopLossOrderType(input.stopLossOrderType);
   const takeProfitPercent = parseOptionalPositiveNumber(input.takeProfitPercent, "Take profit %");
   const maxPositionsPer10Min = parsePositiveInteger(input.maxPositionsPer10Min, "Max positions per 10 min");
+  const symbolCooldownSec = parseNonNegativeNumber(input.symbolCooldownSec, "Symbol cooldown (sec)");
   const direction = parseDirection(input.direction);
   const breakevenTriggerPercent = parsePositiveNumber(input.breakevenTriggerPercent, "Breakeven trigger %");
   const breakevenExtraProfitPercent = parseNonNegativeNumber(input.breakevenExtraProfitPercent, "Breakeven extra profit %");
@@ -325,6 +329,7 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
       stopLossOrderType,
       takeProfitPercent,
       maxPositionsPer10Min,
+      symbolCooldownSec,
       direction,
       breakevenEnabled: input.breakevenEnabled,
       breakevenTriggerPercent,

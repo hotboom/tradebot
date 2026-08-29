@@ -14,6 +14,7 @@
     "stopLossOrderType": "market",
     "takeProfitPercent": null,
     "maxPositionsPer10Min": 3,
+    "symbolCooldownSec": 90,
     "direction": "both",
     "breakevenEnabled": false,
     "breakevenTriggerPercent": 1,

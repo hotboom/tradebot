@@ -15,6 +15,7 @@ export type SignalRejectReason =
   | "invalid_schema"
   | "below_threshold"
   | "hourly_limit"
+  | "symbol_cooldown"
   | "trading_paused"
   | "direction_filtered";
 

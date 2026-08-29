@@ -15,6 +15,7 @@ import { TrailingStopMonitor } from "./trailingStopMonitor";
 import { SymbolQueue } from "./util/symbolQueue";
 import { DedupStore } from "./dedupStore";
 import { PositionRateLimiter } from "./positionRateLimiter";
+import { SymbolCooldown } from "./symbolCooldown";
 import { startAdminServerIfEnabled } from "./admin/index";
 import { isTradingPaused } from "./tradingState";
 import path from "node:path";
@@ -33,6 +34,11 @@ async function main(): Promise<void> {
     path.join(path.dirname(path.resolve(config.logging.signalsLogPath)), "processed_signals.log")
   );
   const positionLimiter = new PositionRateLimiter(config.trading.maxPositionsPer10Min);
+  // Per-symbol cooldown: lqmonitor_obi шлёт всплески почти-дублей по одному символу за
+  // секунды (каждый со своим timestamp, поэтому DedupStore их не ловит). После первого
+  // принятого сигнала по символу глушим последующие по нему на symbolCooldownSec — иначе
+  // всплеск плодит задачи OBI-гейта и выжирает слоты maxPositionsPer10Min на одном символе.
+  const symbolCooldown = new SymbolCooldown(config.trading.symbolCooldownSec * 1000);
 
   const bybitClient = new BybitClient(config.bybit.testnet);
   // Держим соединение с Bybit тёплым, чтобы первый замер стакана в OBI-гейте не платил
@@ -89,6 +95,13 @@ async function main(): Promise<void> {
       return reply.code(200).send({ decision: "rejected", reason: filter.reason });
     }
 
+    // Per-symbol cooldown: свежий всплеск почти-дублей по этому символу уже был принят —
+    // глушим, чтобы не плодить задачи OBI-гейта. Порог 0 отключает (см. SymbolCooldown).
+    if (symbolCooldown.isBlocked(signal.symbol, Date.now())) {
+      signalsLogger.log(signal, "rejected", "symbol_cooldown");
+      return reply.code(200).send({ decision: "rejected", reason: "symbol_cooldown" });
+    }
+
     // Защита от лавины сигналов при обвале рынка: не более N новых позиций в скользящий час.
     // Быстрый предварительный отказ здесь; финальная проверка + учёт открытия — в executor'е,
     // непосредственно перед входом (после OBI-гейта — см. execute()), а не на каждую попытку.
@@ -98,6 +111,8 @@ async function main(): Promise<void> {
     }
 
     signalsLogger.log(signal, "accepted", null);
+    // Запускаем окно кулдауна только на реальном приёме (не на пути hourly_limit выше).
+    symbolCooldown.record(signal.symbol, Date.now());
 
     // Идемпотентность: повторный сигнал (symbol + timestamp) не создаёт новый ордер
     const dedupKey = DedupStore.key(signal.symbol, signal.timestamp);

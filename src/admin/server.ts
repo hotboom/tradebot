@@ -160,6 +160,7 @@ function envFromForm(form: URLSearchParams): EnvFormValues {
     stopLossOrderType: form.get("stopLossOrderType") ?? "market",
     takeProfitPercent: form.get("takeProfitPercent") ?? "",
     maxPositionsPer10Min: form.get("maxPositionsPer10Min") ?? "",
+    symbolCooldownSec: form.get("symbolCooldownSec") ?? "",
     direction: form.get("direction") ?? "both",
     breakevenEnabled: form.get("breakevenEnabled") === "true",
     breakevenTriggerPercent: form.get("breakevenTriggerPercent") ?? "",

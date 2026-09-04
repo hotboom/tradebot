@@ -14,7 +14,7 @@ export type SignalDecision = "accepted" | "rejected";
 export type SignalRejectReason =
   | "invalid_schema"
   | "below_threshold"
-  | "hourly_limit"
+  | "max_pos_limit"
   | "trading_paused"
   | "direction_filtered";
 

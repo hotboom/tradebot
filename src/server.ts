@@ -30,7 +30,10 @@ async function main(): Promise<void> {
   const dedupStore = new DedupStore(
     path.join(path.dirname(path.resolve(config.logging.signalsLogPath)), "processed_signals.log")
   );
-  const positionLimiter = new PositionRateLimiter(config.trading.maxPositionsPer10Min);
+  const positionLimiter = new PositionRateLimiter(
+    config.trading.maxPositions,
+    config.trading.maxPositionsWindowSec * 1000
+  );
 
   const bybitClient = new BybitClient(config.bybit.testnet);
   // Общая очередь: сериализует доступ к условным ордерам позиции по символу между executor'ом,
@@ -88,10 +91,11 @@ async function main(): Promise<void> {
       return reply.code(200).send({ decision: "rejected", reason: filter.reason });
     }
 
-    // Защита от лавины сигналов при обвале рынка: не более N новых позиций в скользящий час
+    // Защита от лавины сигналов при обвале рынка: не более maxPositions новых позиций
+    // в скользящем окне длиной maxPositionsWindowSec (обе величины — из config/админки)
     if (!positionLimiter.canOpen(Date.now())) {
-      signalsLogger.log(signal, "rejected", "hourly_limit");
-      return reply.code(200).send({ decision: "rejected", reason: "hourly_limit" });
+      signalsLogger.log(signal, "rejected", "max_pos_limit");
+      return reply.code(200).send({ decision: "rejected", reason: "max_pos_limit" });
     }
 
     signalsLogger.log(signal, "accepted", null);

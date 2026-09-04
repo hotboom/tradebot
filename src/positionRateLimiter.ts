@@ -1,10 +1,11 @@
-/** Ограничивает число новых позиций в скользящем 10-минутном окне (защита от лавины сигналов при обвале рынка). */
+/** Ограничивает число новых позиций в скользящем окне заданной длины (защита от лавины сигналов при обвале рынка).
+ *  Длина окна настраивается: config.trading.maxPositionsWindowSec. */
 export class PositionRateLimiter {
   private readonly limit: number;
   private readonly windowMs: number;
   private timestamps: number[] = [];
 
-  constructor(limit: number, windowMs: number = 10 * 60 * 1000) {
+  constructor(limit: number, windowMs: number) {
     this.limit = limit;
     this.windowMs = windowMs;
   }

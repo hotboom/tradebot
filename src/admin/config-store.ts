@@ -16,7 +16,8 @@ export type EnvFormValues = {
   stopLossPercent: string;
   stopLossOrderType: string;
   takeProfitPercent: string;
-  maxPositionsPer10Min: string;
+  maxPositions: string;
+  maxPositionsWindowSec: string;
   direction: string;
   breakevenEnabled: boolean;
   breakevenTriggerPercent: string;
@@ -54,7 +55,8 @@ type TradingConfig = {
     stopLossPercent: number | null;
     stopLossOrderType: "market" | "limit";
     takeProfitPercent: number | null;
-    maxPositionsPer10Min: number;
+    maxPositions: number;
+    maxPositionsWindowSec: number;
     direction: "both" | "long" | "short";
     breakevenEnabled: boolean;
     breakevenTriggerPercent: number;
@@ -218,7 +220,8 @@ export async function loadEnv(): Promise<LoadedEnv> {
       stopLossPercent: config.trading.stopLossPercent !== null ? String(config.trading.stopLossPercent) : "",
       stopLossOrderType: config.trading.stopLossOrderType ?? "market",
       takeProfitPercent: config.trading.takeProfitPercent !== null ? String(config.trading.takeProfitPercent) : "",
-      maxPositionsPer10Min: String(config.trading.maxPositionsPer10Min),
+      maxPositions: String(config.trading.maxPositions),
+      maxPositionsWindowSec: String(config.trading.maxPositionsWindowSec ?? 600),
       direction: config.trading.direction ?? "both",
       breakevenEnabled: config.trading.breakevenEnabled ?? false,
       breakevenTriggerPercent: String(config.trading.breakevenTriggerPercent ?? 1),
@@ -268,7 +271,8 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
   const stopLossPercent = parseOptionalPositiveNumber(input.stopLossPercent, "Stop loss %");
   const stopLossOrderType = parseStopLossOrderType(input.stopLossOrderType);
   const takeProfitPercent = parseOptionalPositiveNumber(input.takeProfitPercent, "Take profit %");
-  const maxPositionsPer10Min = parsePositiveInteger(input.maxPositionsPer10Min, "Max positions per 10 min");
+  const maxPositions = parsePositiveInteger(input.maxPositions, "Max positions per window");
+  const maxPositionsWindowSec = parsePositiveInteger(input.maxPositionsWindowSec, "Position limit window (sec)");
   const direction = parseDirection(input.direction);
   const breakevenTriggerPercent = parsePositiveNumber(input.breakevenTriggerPercent, "Breakeven trigger %");
   const breakevenExtraProfitPercent = parseNonNegativeNumber(input.breakevenExtraProfitPercent, "Breakeven extra profit %");
@@ -297,7 +301,8 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
       stopLossPercent,
       stopLossOrderType,
       takeProfitPercent,
-      maxPositionsPer10Min,
+      maxPositions,
+      maxPositionsWindowSec,
       direction,
       breakevenEnabled: input.breakevenEnabled,
       breakevenTriggerPercent,

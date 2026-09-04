@@ -13,6 +13,8 @@
     "stopLossPercent": 1.5,
     "stopLossOrderType": "market",
     "takeProfitPercent": null,
+    "maxPositions": 3,
+    "maxPositionsWindowSec": 600,
     "direction": "both",
     "breakevenEnabled": false,
     "breakevenTriggerPercent": 1,

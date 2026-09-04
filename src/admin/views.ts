@@ -222,9 +222,13 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
             <option value="limit" ${values.entryOrderType === "limit" ? "selected" : ""}>Limit (post-only chase, waits until filled)</option>
           </select>
         </div>
-        <div class="col-md-6">
-          ${labelWithHelp("maxPositionsPer10Min", "Max positions per 10 min", "Caps how many new positions can be opened within any rolling 10-minute window.")}
-          <input class="form-control" id="maxPositionsPer10Min" name="maxPositionsPer10Min" value="${escapeHtml(values.maxPositionsPer10Min)}" inputmode="numeric" required>
+        <div class="col-md-3">
+          ${labelWithHelp("maxPositions", "Max positions per window", "Caps how many new positions can be opened within any rolling window (length set below).")}
+          <input class="form-control" id="maxPositions" name="maxPositions" value="${escapeHtml(values.maxPositions)}" inputmode="numeric" required>
+        </div>
+        <div class="col-md-3">
+          ${labelWithHelp("maxPositionsWindowSec", "Position limit window (sec)", "Length of the rolling window for the position cap above, in seconds (e.g. 300 = 5 min, 600 = 10 min).")}
+          <input class="form-control" id="maxPositionsWindowSec" name="maxPositionsWindowSec" value="${escapeHtml(values.maxPositionsWindowSec)}" inputmode="numeric" required>
         </div>
         <div class="col-md-6">
           ${labelWithHelp("direction", "Direction", "Which liquidation-cascade signals to trade. Signals in the other direction are logged but ignored.")}

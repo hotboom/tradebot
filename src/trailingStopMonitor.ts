@@ -102,6 +102,27 @@ export class TrailingStopMonitor {
     // position.stopLoss. TP живёт отдельным reduce-only лимитником — этот монитор его не трогает.
     const existingSl = stopOrders.find((o) => o.stopOrderType === "PartialStopLoss");
 
+    // Расчётная цена не прошла валидацию (0/NaN — например из-за кривого tickSize): не трогаем
+    // условные ордера позиции (иначе можно снять уже стоящий стоп и не поставить новый) и явно
+    // логируем. return ДО try с отменой ордеров — существующий SL остаётся на месте.
+    if (!Number.isFinite(candidatePrice) || candidatePrice <= 0) {
+      this.logger.log({
+        symbol,
+        side,
+        avgPrice,
+        markPrice,
+        profitPercent,
+        previousStopLoss: existingSl ? existingSl.triggerPrice : null,
+        newStopLoss: candidatePrice,
+        slOrderType: null,
+        backupStopLoss: null,
+        status: "failed",
+        error: `расчётная цена трейлинг-стопа некорректна (${candidatePrice}), tickSize ${instrument.tickSize} — SL не двигаем`,
+      });
+      console.error(`${LOG_TAG} ${symbol} некорректная цена трейлинг-стопа ${candidatePrice}, пропускаем`);
+      return;
+    }
+
     // Подтягиваем стоп только в сторону прибыли — если цена откатилась против позиции,
     // кандидат хуже уже выставленного стопа, и мы его не трогаем.
     const isImprovement =

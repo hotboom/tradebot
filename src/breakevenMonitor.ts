@@ -116,6 +116,27 @@ export class BreakevenMonitor {
     // reduce-only лимитником (не condition-ордер) — этот монитор его не касается.
     const existingSl = stopOrders.find((o) => o.stopOrderType === "PartialStopLoss");
 
+    // Расчётная цена не прошла валидацию (0/NaN — например из-за кривого tickSize): не трогаем
+    // условные ордера позиции (иначе можно снять уже стоящий стоп и не поставить новый) и явно
+    // логируем. return ДО try с отменой ордеров — существующий SL остаётся на месте.
+    if (!Number.isFinite(breakevenPrice) || breakevenPrice <= 0) {
+      this.logger.log({
+        symbol,
+        side,
+        avgPrice,
+        markPrice,
+        profitPercent,
+        previousStopLoss: existingSl ? existingSl.triggerPrice : null,
+        newStopLoss: breakevenPrice,
+        slOrderType: null,
+        backupStopLoss: null,
+        status: "failed",
+        error: `расчётная цена безубытка некорректна (${breakevenPrice}), tickSize ${instrument.tickSize} — SL не двигаем`,
+      });
+      console.error(`${LOG_TAG} ${symbol} некорректная цена безубытка ${breakevenPrice}, пропускаем`);
+      return;
+    }
+
     // Стоп уже на безубытке или лучше — не отодвигаем его назад и не дёргаем биржу зря на
     // каждом тике.
     const alreadyProtected =

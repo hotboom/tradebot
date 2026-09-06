@@ -338,6 +338,11 @@ export class BybitClient {
       tpslMode: "Partial",
     };
     if (params.stopLoss != null) {
+      // Ноль/NaN/отрицательное на биржу не отправляем: Bybit трактует stopLoss=0 как снятие
+      // стопа, и в tpslMode "Partial" это ещё и ломает пару slSize/stopLoss (retCode 10001).
+      if (!Number.isFinite(params.stopLoss) || params.stopLoss <= 0) {
+        throw new Error(`setTradingStop: некорректная цена stopLoss ${params.stopLoss}`);
+      }
       body.stopLoss = String(params.stopLoss);
       body.slSize = String(params.qty);
       const slOrderType = params.stopLossOrderType ?? "Market";
@@ -355,6 +360,9 @@ export class BybitClient {
   /** Независимый reduce-only условный маркет-ордер (страховочный SL "на всякий случай",
    * не привязан к TP/SL-слоту позиции — работает как отдельный ордер на бирже). */
   async submitStopMarketOrder(params: StopMarketOrderParams): Promise<string> {
+    if (!Number.isFinite(params.triggerPrice) || params.triggerPrice <= 0) {
+      throw new Error(`submitStopMarketOrder: некорректная цена triggerPrice ${params.triggerPrice}`);
+    }
     const order: Record<string, string | number | boolean> = {
       category: "linear",
       symbol: params.symbol,
@@ -417,6 +425,9 @@ export class BybitClient {
    * лимитник и так исполнится как maker), а гарантия, что ордер вообще встал, тут важнее
    * гарантии maker-комиссии — PostOnly может асинхронно отклониться на пересечённой цене. */
   async submitTakeProfitLimitOrder(params: LimitOrderParams): Promise<string> {
+    if (!Number.isFinite(params.price) || params.price <= 0) {
+      throw new Error(`submitTakeProfitLimitOrder: некорректная цена price ${params.price}`);
+    }
     const res = await this.rest.submitOrder({
       category: "linear",
       symbol: params.symbol,

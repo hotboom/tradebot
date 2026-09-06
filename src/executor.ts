@@ -5,7 +5,7 @@ import type { CascadeSignal, OrderSide } from "./types";
 import { resolveOrderSide } from "./decision/filters";
 import { calcExitPrices, SL_BACKUP_BUFFER_MULTIPLIER } from "./decision/exits";
 import { chaseLimitEntry } from "./bybit/limitChaseEntry";
-import { roundDownToStep, roundToTick } from "./util/rounding";
+import { roundDownToStep, roundToTick, placeablePrice } from "./util/rounding";
 import type { BreakevenMonitor } from "./breakevenMonitor";
 import type { TrailingStopMonitor } from "./trailingStopMonitor";
 import type { SymbolQueue } from "./util/symbolQueue";
@@ -98,8 +98,17 @@ export class OrderExecutor {
         this.config.trading.stopLossPercent,
         this.config.trading.takeProfitPercent
       );
-      sl = exits.stopLoss !== null ? roundToTick(exits.stopLoss, instrument.tickSize) : null;
-      tp = exits.takeProfit !== null ? roundToTick(exits.takeProfit, instrument.tickSize) : null;
+      sl = placeablePrice(exits.stopLoss !== null ? roundToTick(exits.stopLoss, instrument.tickSize) : null);
+      tp = placeablePrice(exits.takeProfit !== null ? roundToTick(exits.takeProfit, instrument.tickSize) : null);
+      // exits вернул цену, а после округления она невалидна (0/NaN — например из-за кривого
+      // tickSize у низкоценовой монеты): на биржу нулём НЕ шлём (Bybit воспримет 0 как снятие
+      // стопа), фиксируем как ошибку в orders.log.
+      const riskPriceError =
+        (exits.stopLoss !== null && sl === null) || (exits.takeProfit !== null && tp === null)
+          ? `${[exits.stopLoss !== null && sl === null ? "SL" : null, exits.takeProfit !== null && tp === null ? "TP" : null]
+              .filter((x): x is string => x !== null)
+              .join("+")} не выставлен: некорректная цена после округления (tickSize ${instrument.tickSize})`
+          : null;
 
       // Резервный маркет-SL считаем заранее (нужен только если основной SL — лимитный).
       if (sl !== null && this.config.trading.stopLossOrderType === "limit" && this.config.trading.stopLossPercent !== null) {
@@ -124,8 +133,11 @@ export class OrderExecutor {
         tp,
         status: "filled",
         bybitOrderId: orderId,
-        error: null,
+        error: riskPriceError,
       });
+      if (riskPriceError) {
+        console.error(`[executor] ${signal.symbol} ${riskPriceError}`);
+      }
     } catch (err) {
       this.ordersLogger.log({
         symbol: signal.symbol,

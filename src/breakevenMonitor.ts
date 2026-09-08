@@ -1,8 +1,8 @@
 import type { AppConfig } from "./config";
 import type { BybitClient, OpenPositionSummary } from "./bybit/client";
 import type { BreakevenLogger } from "./logging/breakevenLogger";
-import type { OrderSide } from "./types";
 import { SL_BACKUP_BUFFER_MULTIPLIER } from "./decision/exits";
+import { replacePositionStop, stopLossOnValidSide } from "./decision/riskOrders";
 import { roundToTick } from "./util/rounding";
 import type { SymbolQueue } from "./util/symbolQueue";
 
@@ -92,10 +92,11 @@ export class BreakevenMonitor {
     const profitPercent = (((markPrice - avgPrice) / avgPrice) * 100) * sign;
     if (profitPercent < this.config.trading.breakevenTriggerPercent) return;
 
-    const [instrument, feeRate, stopOrders] = await Promise.all([
+    const [instrument, feeRate, stopOrders, lastPrice] = await Promise.all([
       this.client.getInstrumentInfo(symbol),
       this.client.getFeeRate(symbol),
       this.client.getOpenStopOrders(symbol),
+      this.client.getLastPrice(symbol),
     ]);
 
     // Безубыток с учётом комиссии: цена, при закрытии по которой (по тейкеру, худший случай)
@@ -144,6 +145,16 @@ export class BreakevenMonitor {
       (side === "Buy" ? existingSl.triggerPrice >= breakevenPrice : existingSl.triggerPrice <= breakevenPrice);
     if (alreadyProtected) return;
 
+    // Цена безубытка не с той стороны текущей цены (быстрый рынок ушёл дальше, чем markPrice
+    // из snapshot позиции) — Bybit отбил бы setTradingStop (retCode 10001). Не трогаем
+    // существующий стоп, ждём следующего тика.
+    if (!stopLossOnValidSide(side, breakevenPrice, lastPrice)) {
+      console.warn(
+        `${LOG_TAG} ${symbol} цена безубытка ${breakevenPrice} не с той стороны цены ${lastPrice}, пропускаем тик`
+      );
+      return;
+    }
+
     // Резервный market-SL чуть дальше лимитного безубытка — на случай, если лимитный ордер
     // не успеет исполниться при резком движении (тот же приём, что и для основного SL, см.
     // executor.ts). Дистанция от avgPrice до backup — дистанция до breakeven, увеличенная на
@@ -152,62 +163,29 @@ export class BreakevenMonitor {
     const backupPrice = roundToTick(avgPrice * (1 + sign * backupDistanceRate), instrument.tickSize);
 
     try {
-      // Чистим условные ордера риск-менеджмента позиции (Partial SL, независимый backup-SL)
-      // перед пересозданием — см. комментарий к getOpenStopOrders в bybit/client.ts: повторный
-      // setTradingStop не заменяет старый partial-ордер, а добавляет новый поверх. Легаси
-      // PartialTakeProfit (у позиций, открытых до перехода на лимитный TP) НЕ трогаем — TP
-      // теперь отдельный reduce-only лимитник, этот монитор им не управляет.
-      for (const order of stopOrders) {
-        if (order.stopOrderType === "PartialTakeProfit") continue;
-        await this.client.cancelOrder({ symbol, orderId: order.orderId });
-      }
-
-      // SL — лимитным ордером (maker-комиссия), с фоллбэком на market, если лимитник вообще не
-      // встал (например, недостаточно ликвидности по цене).
-      let appliedSlOrderType: "Limit" | "Market" = "Limit";
-      let limitFallbackReason: string | null = null;
-      try {
-        await this.client.setTradingStop({
-          symbol,
-          qty: size,
-          stopLoss: breakevenPrice,
-          stopLossOrderType: "Limit",
-        });
-      } catch (err) {
-        appliedSlOrderType = "Market";
-        limitFallbackReason = err instanceof Error ? err.message : String(err);
-        await this.client.setTradingStop({
-          symbol,
-          qty: size,
-          stopLoss: breakevenPrice,
-          stopLossOrderType: "Market",
-        });
-      }
-
-      // Резервный ордер нужен только пока основной действительно лимитный — на market он и так
-      // исполняется немедленно по срабатыванию.
-      let backupPlaced = false;
-      let backupError: string | null = null;
-      if (appliedSlOrderType === "Limit") {
-        const closingSide: OrderSide = side === "Buy" ? "Sell" : "Buy";
-        const triggerDirection: 1 | 2 = side === "Buy" ? 2 : 1;
-        try {
-          await this.client.submitStopMarketOrder({
-            symbol,
-            side: closingSide,
-            qty: size,
-            triggerPrice: backupPrice,
-            triggerDirection,
-          });
-          backupPlaced = true;
-        } catch (err) {
-          backupError = err instanceof Error ? err.message : String(err);
-        }
-      }
+      // place-before-cancel: новый SL ставим ДО отмены старого; старые ордера
+      // риск-менеджмента снимаются внутри только после того, как новый SL подтверждён (см.
+      // replacePositionStop — инцидент BNCUSDT 2026-09-08).
+      const {
+        appliedSlOrderType,
+        limitFallbackReason,
+        backupPlaced,
+        backupError,
+        cleanupError,
+      } = await replacePositionStop(this.client, {
+        symbol,
+        positionSide: side,
+        size,
+        stopLoss: breakevenPrice,
+        stopLossOrderType: "Limit",
+        backupStopLoss: backupPrice,
+        staleOrders: stopOrders,
+      });
 
       const notes = [
         limitFallbackReason ? `limit SL rejected, fell back to market SL: ${limitFallbackReason}` : null,
         backupError ? `backup market SL not set: ${backupError}` : null,
+        cleanupError ? `stale order cleanup failed: ${cleanupError}` : null,
       ].filter((note): note is string => note !== null);
 
       this.logger.log({
@@ -227,7 +205,9 @@ export class BreakevenMonitor {
         `${LOG_TAG} ${symbol} SL moved to breakeven ${breakevenPrice} (${appliedSlOrderType}, profit ${profitPercent.toFixed(2)}%)`
       );
     } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
+      // Новый SL не удалось поставить — replacePositionStop в этом случае НЕ трогает старые
+      // ордера, позиция остаётся под защитой прежнего стопа.
+      const error = `${err instanceof Error ? err.message : String(err)} — прежний SL сохранён`;
       this.logger.log({
         symbol,
         side,
@@ -241,7 +221,7 @@ export class BreakevenMonitor {
         status: "failed",
         error,
       });
-      console.error(`${LOG_TAG} ${symbol} failed to move SL to breakeven:`, err);
+      console.error(`${LOG_TAG} ${symbol} failed to move SL to breakeven (прежний SL сохранён):`, err);
     }
   }
 }

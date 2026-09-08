@@ -4,6 +4,7 @@ import type { OrdersLogger } from "./logging/ordersLogger";
 import type { CascadeSignal, OrderSide } from "./types";
 import { resolveOrderSide } from "./decision/filters";
 import { calcExitPrices, SL_BACKUP_BUFFER_MULTIPLIER } from "./decision/exits";
+import { replacePositionStop } from "./decision/riskOrders";
 import { chaseLimitEntry } from "./bybit/limitChaseEntry";
 import { roundDownToStep, roundToTick, placeablePrice } from "./util/rounding";
 import type { BreakevenMonitor } from "./breakevenMonitor";
@@ -168,16 +169,22 @@ export class OrderExecutor {
       // повторном входе по символу): условные (Partial SL от setTradingStop + независимый
       // backup-SL — setTradingStop в tpslMode "Partial" не заменяет предыдущие partial-ордера,
       // а добавляет новые поверх) и обычный reduce-only лимитный TP (его размер/цену
-      // пересоздаём под новый объём позиции).
+      // пересоздаём под новый объём позиции). Условные ордера, если ставим новый SL, снимаем
+      // не здесь, а внутри replacePositionStop — уже ПОСЛЕ того, как новый SL подтверждён
+      // (place-before-cancel, см. инцидент BNCUSDT 2026-09-08).
       let cleanupError: string | null = null;
       const noteCleanupError = (err: unknown): void => {
         const msg = err instanceof Error ? err.message : String(err);
         cleanupError = cleanupError ? `${cleanupError}; ${msg}` : msg;
       };
+      let staleStopOrders: Awaited<ReturnType<typeof this.client.getOpenStopOrders>> = [];
       try {
-        const staleOrders = await this.client.getOpenStopOrders(signal.symbol);
-        for (const staleOrder of staleOrders) {
-          await this.client.cancelOrder({ symbol: signal.symbol, orderId: staleOrder.orderId });
+        staleStopOrders = await this.client.getOpenStopOrders(signal.symbol);
+        if (sl === null) {
+          // SL не ставим (выключен в конфиге) — старые условные ордера всё равно снимаем сразу.
+          for (const staleOrder of staleStopOrders) {
+            await this.client.cancelOrder({ symbol: signal.symbol, orderId: staleOrder.orderId });
+          }
         }
       } catch (err) {
         noteCleanupError(err);
@@ -191,82 +198,42 @@ export class OrderExecutor {
         noteCleanupError(err);
       }
 
-      // SL на позицию.
-      if (sl !== null) {
-        try {
-          await this.client.setTradingStop({
-            symbol: signal.symbol,
-            qty: positionQty as number,
-            stopLoss: sl,
-            stopLossOrderType: appliedSlOrderType ?? "Market",
-          });
-        } catch (err) {
-          // Лимитный SL не встал (например, недостаточно ликвидности по цене) — пробуем
-          // обычный маркет SL, чтобы не остаться без защиты позиции.
-          if (preferLimitSl) {
-            appliedSlOrderType = "Market";
-            try {
-              await this.client.setTradingStop({
-                symbol: signal.symbol,
-                qty: positionQty as number,
-                stopLoss: sl,
-                stopLossOrderType: "Market",
-              });
-            } catch (fallbackErr) {
-              this.ordersLogger.log({
-                symbol: signal.symbol,
-                side,
-                qty,
-                entryPriceRef,
-                refMarketPrice,
-                sl,
-                slOrderType: null,
-                slBackupPrice: null,
-                tp,
-                status: "failed",
-                bybitOrderId: orderId,
-                error: `SL not set (limit SL failed: ${err instanceof Error ? err.message : String(err)}; market SL fallback failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)})`,
-              });
-              return;
-            }
-          } else {
-            this.ordersLogger.log({
-              symbol: signal.symbol,
-              side,
-              qty,
-              entryPriceRef,
-              refMarketPrice,
-              sl,
-              slOrderType: null,
-              slBackupPrice: null,
-              tp,
-              status: "failed",
-              bybitOrderId: orderId,
-              error: `SL not set: ${err instanceof Error ? err.message : String(err)}`,
-            });
-            return;
-          }
-        }
-      }
-
-      // Резервный маркет-SL ставим только если основной действительно встал как Limit — если
-      // он уже упал на Market, страховка избыточна: Market и так закрывает позицию немедленно
-      // по срабатыванию (старые condition-ордера, включая прошлый backup, уже подчищены выше).
+      // SL на позицию (place-before-cancel: новый SL + backup ставятся до отмены старых
+      // условных ордеров, старые снимаются только после подтверждения нового — при полном
+      // провале старый SL остаётся на месте).
       let backupPlaced = false;
       let backupOrderError: string | null = null;
-      if (appliedSlOrderType === "Limit" && slBackup !== null) {
-        const triggerDirection: 1 | 2 = side === "Buy" ? 2 : 1;
+      if (sl !== null) {
         try {
-          await this.client.submitStopMarketOrder({
+          const result = await replacePositionStop(this.client, {
             symbol: signal.symbol,
-            side: closingSide,
-            qty: positionQty as number,
-            triggerPrice: slBackup,
-            triggerDirection,
+            positionSide: side,
+            size: positionQty as number,
+            stopLoss: sl,
+            stopLossOrderType: preferLimitSl ? "Limit" : "Market",
+            backupStopLoss: preferLimitSl ? slBackup : null,
+            staleOrders: staleStopOrders,
           });
-          backupPlaced = true;
+          appliedSlOrderType = result.appliedSlOrderType;
+          backupPlaced = result.backupPlaced;
+          backupOrderError = result.backupError;
+          if (result.cleanupError) noteCleanupError(result.cleanupError);
         } catch (err) {
-          backupOrderError = err instanceof Error ? err.message : String(err);
+          this.ordersLogger.log({
+            symbol: signal.symbol,
+            side,
+            qty,
+            entryPriceRef,
+            refMarketPrice,
+            sl,
+            slOrderType: null,
+            slBackupPrice: null,
+            tp,
+            status: "failed",
+            bybitOrderId: orderId,
+            error: `SL not set: ${err instanceof Error ? err.message : String(err)}`,
+          });
+          return;
         }
       }
 

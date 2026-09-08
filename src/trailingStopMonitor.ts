@@ -1,8 +1,8 @@
 import type { AppConfig } from "./config";
 import type { BybitClient, OpenPositionSummary } from "./bybit/client";
 import type { TrailingLogger } from "./logging/trailingLogger";
-import type { OrderSide } from "./types";
 import { SL_BACKUP_BUFFER_MULTIPLIER } from "./decision/exits";
+import { replacePositionStop, stopLossOnValidSide } from "./decision/riskOrders";
 import { roundToTick } from "./util/rounding";
 import type { SymbolQueue } from "./util/symbolQueue";
 
@@ -26,8 +26,12 @@ const LOG_TAG = "[trailing]";
  * выгодным из-за гонки между таймерами.
  *
  * Работает как таймер, а не постоянный цикл: start() запускается один раз после каждого
- * успешного открытия позиции (см. executor.ts) и на старте процесса (см. server.ts) — если
- * открытых позиций нет, первый же тик сам себя останавливает (clearInterval).
+ * успешного открытия позиции (см. executor.ts) и на старте процесса (см. server.ts). Первая
+ * проверка происходит не сразу, а через trailingCheckIntervalSec после открытия — чтобы
+ * резкий, но кратковременный всплеск волатильности сразу после входа (тот же каскад
+ * ликвидаций, что и породил сигнал) не дёргал стоп по неактуальной цене в первые же
+ * миллисекунды позиции (см. инцидент BNCUSDT 2026-09-08). Если к моменту первого тика
+ * открытых позиций уже нет, тик сам себя останавливает (clearInterval).
  */
 export class TrailingStopMonitor {
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -47,8 +51,9 @@ export class TrailingStopMonitor {
 
     const intervalMs = this.config.trading.trailingCheckIntervalSec * 1000;
     console.log(`${LOG_TAG} monitor started (interval ${this.config.trading.trailingCheckIntervalSec}s)`);
+    // Первый тик — не сразу, а через интервал: не трогаем стоп во всплеск волатильности
+    // сразу после входа (см. комментарий к классу).
     this.timer = setInterval(() => void this.tick(), intervalMs);
-    void this.tick();
   }
 
   private stop(): void {
@@ -87,9 +92,10 @@ export class TrailingStopMonitor {
     const profitPercent = (((markPrice - avgPrice) / avgPrice) * 100) * sign;
     if (profitPercent < this.config.trading.trailingTriggerPercent) return;
 
-    const [instrument, stopOrders] = await Promise.all([
+    const [instrument, stopOrders, lastPrice] = await Promise.all([
       this.client.getInstrumentInfo(symbol),
       this.client.getOpenStopOrders(symbol),
+      this.client.getLastPrice(symbol),
     ]);
 
     const trailingDistance = this.config.trading.trailingStopPercent / 100;
@@ -130,63 +136,45 @@ export class TrailingStopMonitor {
       (side === "Buy" ? candidatePrice > existingSl.triggerPrice : candidatePrice < existingSl.triggerPrice);
     if (!isImprovement) return;
 
+    // Кандидат посчитан от markPrice из snapshot позиции — на резко пилящем рынке он легко
+    // оказывается уже не с той стороны текущей цены, и Bybit отбил бы setTradingStop (retCode
+    // 10001). Не трогаем существующий стоп, ждём следующего тика с актуальной ценой.
+    if (!stopLossOnValidSide(side, candidatePrice, lastPrice)) {
+      console.warn(
+        `${LOG_TAG} ${symbol} кандидат трейлинг-стопа ${candidatePrice} не с той стороны цены ${lastPrice}, пропускаем тик`
+      );
+      return;
+    }
+
     const backupPrice = roundToTick(
       markPrice * (1 - sign * trailingDistance * SL_BACKUP_BUFFER_MULTIPLIER),
       instrument.tickSize
     );
 
     try {
-      // Чистим условные ордера риск-менеджмента позиции (Partial SL, backup-SL) перед
-      // пересозданием — см. комментарий к getOpenStopOrders в bybit/client.ts. Легаси
-      // PartialTakeProfit (позиции до перехода на лимитный TP) НЕ трогаем — TP теперь отдельный
-      // reduce-only лимитник, этот монитор им не управляет.
-      for (const order of stopOrders) {
-        if (order.stopOrderType === "PartialTakeProfit") continue;
-        await this.client.cancelOrder({ symbol, orderId: order.orderId });
-      }
-
-      let appliedSlOrderType: "Limit" | "Market" = "Limit";
-      let limitFallbackReason: string | null = null;
-      try {
-        await this.client.setTradingStop({
-          symbol,
-          qty: size,
-          stopLoss: candidatePrice,
-          stopLossOrderType: "Limit",
-        });
-      } catch (err) {
-        appliedSlOrderType = "Market";
-        limitFallbackReason = err instanceof Error ? err.message : String(err);
-        await this.client.setTradingStop({
-          symbol,
-          qty: size,
-          stopLoss: candidatePrice,
-          stopLossOrderType: "Market",
-        });
-      }
-
-      let backupPlaced = false;
-      let backupError: string | null = null;
-      if (appliedSlOrderType === "Limit") {
-        const closingSide: OrderSide = side === "Buy" ? "Sell" : "Buy";
-        const triggerDirection: 1 | 2 = side === "Buy" ? 2 : 1;
-        try {
-          await this.client.submitStopMarketOrder({
-            symbol,
-            side: closingSide,
-            qty: size,
-            triggerPrice: backupPrice,
-            triggerDirection,
-          });
-          backupPlaced = true;
-        } catch (err) {
-          backupError = err instanceof Error ? err.message : String(err);
-        }
-      }
+      // place-before-cancel: новый SL ставим ДО отмены старого; старые ордера
+      // риск-менеджмента снимаются внутри только после того, как новый SL подтверждён (см.
+      // replacePositionStop — инцидент BNCUSDT 2026-09-08).
+      const {
+        appliedSlOrderType,
+        limitFallbackReason,
+        backupPlaced,
+        backupError,
+        cleanupError,
+      } = await replacePositionStop(this.client, {
+        symbol,
+        positionSide: side,
+        size,
+        stopLoss: candidatePrice,
+        stopLossOrderType: "Limit",
+        backupStopLoss: backupPrice,
+        staleOrders: stopOrders,
+      });
 
       const notes = [
         limitFallbackReason ? `limit SL rejected, fell back to market SL: ${limitFallbackReason}` : null,
         backupError ? `backup market SL not set: ${backupError}` : null,
+        cleanupError ? `stale order cleanup failed: ${cleanupError}` : null,
       ].filter((note): note is string => note !== null);
 
       this.logger.log({
@@ -206,7 +194,9 @@ export class TrailingStopMonitor {
         `${LOG_TAG} ${symbol} SL trailed to ${candidatePrice} (${appliedSlOrderType}, profit ${profitPercent.toFixed(2)}%)`
       );
     } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
+      // Новый SL не удалось поставить — replacePositionStop в этом случае НЕ трогает старые
+      // ордера, позиция остаётся под защитой прежнего стопа.
+      const error = `${err instanceof Error ? err.message : String(err)} — прежний SL сохранён`;
       this.logger.log({
         symbol,
         side,
@@ -220,7 +210,7 @@ export class TrailingStopMonitor {
         status: "failed",
         error,
       });
-      console.error(`${LOG_TAG} ${symbol} failed to trail SL:`, err);
+      console.error(`${LOG_TAG} ${symbol} failed to trail SL (прежний SL сохранён):`, err);
     }
   }
 }

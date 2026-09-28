@@ -299,6 +299,14 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
         </div>
       </div>
       <hr class="my-4">
+      <h2 class="h6 text-uppercase text-secondary">Position size sync</h2>
+      <div class="row g-3">
+        <div class="col-md-6">
+          ${labelWithHelp("positionSyncCheckIntervalSec", "Check interval (sec)", "How often, in seconds, a background monitor compares each open position's actual size against its TP limit order and both SL orders (main + backup), and amends any that are stale (e.g. after a manual partial close) to the new size — without moving their price/trigger. Always on, independent of the breakeven/trailing toggles above.")}
+          <input class="form-control" id="positionSyncCheckIntervalSec" name="positionSyncCheckIntervalSec" value="${escapeHtml(values.positionSyncCheckIntervalSec)}" inputmode="numeric" required>
+        </div>
+      </div>
+      <hr class="my-4">
       <h2 class="h6 text-uppercase text-secondary">Bybit API</h2>
       <div class="mb-3">
         ${labelWithHelp("bybitApiKey", "BYBIT_API_KEY", "API key for your Bybit account, used to place and manage orders.")}

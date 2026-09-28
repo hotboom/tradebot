@@ -169,7 +169,8 @@ function envFromForm(form: URLSearchParams): EnvFormValues {
     trailingEnabled: form.get("trailingEnabled") === "true",
     trailingTriggerPercent: form.get("trailingTriggerPercent") ?? "",
     trailingStopPercent: form.get("trailingStopPercent") ?? "",
-    trailingCheckIntervalSec: form.get("trailingCheckIntervalSec") ?? ""
+    trailingCheckIntervalSec: form.get("trailingCheckIntervalSec") ?? "",
+    positionSyncCheckIntervalSec: form.get("positionSyncCheckIntervalSec") ?? ""
   };
 }
 

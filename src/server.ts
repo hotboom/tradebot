@@ -8,9 +8,11 @@ import { SignalsLogger } from "./logging/signalsLogger";
 import { OrdersLogger } from "./logging/ordersLogger";
 import { BreakevenLogger } from "./logging/breakevenLogger";
 import { TrailingLogger } from "./logging/trailingLogger";
+import { PositionSyncLogger } from "./logging/positionSyncLogger";
 import { OrderExecutor } from "./executor";
 import { BreakevenMonitor } from "./breakevenMonitor";
 import { TrailingStopMonitor } from "./trailingStopMonitor";
+import { PositionSizeSyncMonitor } from "./positionSizeSyncMonitor";
 import { SymbolQueue } from "./util/symbolQueue";
 import { DedupStore } from "./dedupStore";
 import { PositionRateLimiter } from "./positionRateLimiter";
@@ -27,6 +29,7 @@ async function main(): Promise<void> {
   const ordersLogger = new OrdersLogger(config.logging.ordersLogPath);
   const breakevenLogger = new BreakevenLogger(config.logging.breakevenLogPath);
   const trailingLogger = new TrailingLogger(config.logging.trailingLogPath);
+  const positionSyncLogger = new PositionSyncLogger(config.logging.positionSyncLogPath);
   const dedupStore = new DedupStore(
     path.join(path.dirname(path.resolve(config.logging.signalsLogPath)), "processed_signals.log")
   );
@@ -41,13 +44,23 @@ async function main(): Promise<void> {
   const symbolQueue = new SymbolQueue();
   const breakevenMonitor = new BreakevenMonitor(config, bybitClient, breakevenLogger, symbolQueue);
   const trailingStopMonitor = new TrailingStopMonitor(config, bybitClient, trailingLogger, symbolQueue);
-  const executor = new OrderExecutor(config, bybitClient, ordersLogger, breakevenMonitor, trailingStopMonitor, symbolQueue);
+  const positionSizeSyncMonitor = new PositionSizeSyncMonitor(config, bybitClient, positionSyncLogger, symbolQueue);
+  const executor = new OrderExecutor(
+    config,
+    bybitClient,
+    ordersLogger,
+    breakevenMonitor,
+    trailingStopMonitor,
+    positionSizeSyncMonitor,
+    symbolQueue
+  );
 
   // На случай рестарта процесса (pm2 autorestart/деплой) с уже открытой позицией: если
   // позиций нет, монитор тут же остановит сам себя на первом тике (см. BreakevenMonitor.tick /
-  // TrailingStopMonitor.tick).
+  // TrailingStopMonitor.tick / PositionSizeSyncMonitor.tick).
   breakevenMonitor.start();
   trailingStopMonitor.start();
+  positionSizeSyncMonitor.start();
 
   const app = Fastify({ logger: true });
 

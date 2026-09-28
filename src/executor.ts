@@ -9,6 +9,7 @@ import { chaseLimitEntry } from "./bybit/limitChaseEntry";
 import { roundDownToStep, roundToTick, placeablePrice } from "./util/rounding";
 import type { BreakevenMonitor } from "./breakevenMonitor";
 import type { TrailingStopMonitor } from "./trailingStopMonitor";
+import type { PositionSizeSyncMonitor } from "./positionSizeSyncMonitor";
 import type { SymbolQueue } from "./util/symbolQueue";
 
 export class OrderExecutor {
@@ -18,7 +19,8 @@ export class OrderExecutor {
     private readonly ordersLogger: OrdersLogger,
     private readonly breakevenMonitor: BreakevenMonitor,
     private readonly trailingStopMonitor: TrailingStopMonitor,
-    // Сериализация по символу (общая с BreakevenMonitor/TrailingStopMonitor): не даём двум
+    private readonly positionSizeSyncMonitor: PositionSizeSyncMonitor,
+    // Сериализация по символу (общая с BreakevenMonitor/TrailingStopMonitor/PositionSizeSyncMonitor): не даём двум
     // сигналам по одному символу, либо сигналу и тику монитора, выполняться параллельно —
     // иначе пересчёт SL/TP от средней цены/объёма позиции (см. run()) и отмена/пересоздание
     // условных ордеров могут гоняться за неактуальным состоянием позиции. Разные символы друг
@@ -91,6 +93,7 @@ export class OrderExecutor {
       // монитора идемпотентны и не делают ничего, если выключены в настройках.
       this.breakevenMonitor.start();
       this.trailingStopMonitor.start();
+      this.positionSizeSyncMonitor.start();
 
       // SL/TP считаем после входа от фактической цены исполнения — не задерживает вход.
       const exits = calcExitPrices(

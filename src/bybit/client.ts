@@ -57,6 +57,12 @@ export interface AmendOrderParams {
   price: number;
 }
 
+export interface AmendOrderQtyParams {
+  symbol: string;
+  orderId: string;
+  qty: number;
+}
+
 export interface OrderState {
   orderStatus: string;
   cumExecQty: number;
@@ -87,6 +93,9 @@ export interface OpenStopOrder {
   /** Триггерная цена ордера — для PartialStopLoss/PartialTakeProfit совпадает с ценой,
    * переданной в setTradingStop (slLimitPrice/tpLimitPrice ставятся туда же). */
   triggerPrice: number;
+  /** Объём ордера — нужен PositionSizeSyncMonitor, чтобы сверять его с текущим размером
+   * позиции после ручного частичного закрытия. */
+  qty: number;
 }
 
 /** Bybit не всегда возвращает один и тот же retCode для "ордера больше не существует"
@@ -478,6 +487,24 @@ export class BybitClient {
     throw new Error(`amendOrder failed: ${res.retCode} ${res.retMsg}`);
   }
 
+  /** Меняет только объём резидентного ордера (обычного лимитного TP или условного SL/backup-SL),
+   * не трогая его цену/триггер — используется PositionSizeSyncMonitor, чтобы подтянуть TP и оба
+   * SL под фактический размер позиции после ручного частичного закрытия, оставив их на прежних
+   * ценах. /v5/order/amend принимает qty независимо от price/triggerPrice (амендится только то,
+   * что передано) и работает по orderId одинаково что для обычных, что для условных ордеров.
+   * Возвращает "gone" вместо throw, если ордер уже пропал (исполнился/отменён) — ожидаемая гонка. */
+  async amendOrderQty(params: AmendOrderQtyParams): Promise<"amended" | "gone"> {
+    const res = await this.rest.amendOrder({
+      category: "linear",
+      symbol: params.symbol,
+      orderId: params.orderId,
+      qty: String(params.qty),
+    });
+    if (res.retCode === 0) return "amended";
+    if (isOrderGoneRetCode(res.retCode, res.retMsg)) return "gone";
+    throw new Error(`amendOrder (qty) failed: ${res.retCode} ${res.retMsg}`);
+  }
+
   /** Отмена ордера. Возвращает тихо (без throw), если ордер уже исполнился/пропал между
    * запросом списка и отменой — ожидаемая гонка, не ошибка (см. isOrderGoneRetCode). */
   async cancelOrder(params: { symbol: string; orderId: string }): Promise<void> {
@@ -514,6 +541,7 @@ export class BybitClient {
       orderId: order.orderId,
       stopOrderType: order.stopOrderType,
       triggerPrice: Number(order.triggerPrice),
+      qty: Number(order.qty),
     }));
   }
 

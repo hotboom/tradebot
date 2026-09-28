@@ -27,6 +27,7 @@ export type EnvFormValues = {
   trailingTriggerPercent: string;
   trailingStopPercent: string;
   trailingCheckIntervalSec: string;
+  positionSyncCheckIntervalSec: string;
 };
 
 export type LoadedEnv = {
@@ -66,12 +67,14 @@ type TradingConfig = {
     trailingTriggerPercent: number;
     trailingStopPercent: number;
     trailingCheckIntervalSec: number;
+    positionSyncCheckIntervalSec: number;
   };
   logging: {
     signalsLogPath: string;
     ordersLogPath: string;
     breakevenLogPath: string;
     trailingLogPath: string;
+    positionSyncLogPath: string;
   };
 };
 
@@ -230,7 +233,8 @@ export async function loadEnv(): Promise<LoadedEnv> {
       trailingEnabled: config.trading.trailingEnabled ?? false,
       trailingTriggerPercent: String(config.trading.trailingTriggerPercent ?? 5),
       trailingStopPercent: String(config.trading.trailingStopPercent ?? 1),
-      trailingCheckIntervalSec: String(config.trading.trailingCheckIntervalSec ?? 60)
+      trailingCheckIntervalSec: String(config.trading.trailingCheckIntervalSec ?? 60),
+      positionSyncCheckIntervalSec: String(config.trading.positionSyncCheckIntervalSec ?? 10)
     }
   };
 }
@@ -280,6 +284,10 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
   const trailingTriggerPercent = parsePositiveNumber(input.trailingTriggerPercent, "Trailing trigger %");
   const trailingStopPercent = parsePositiveNumber(input.trailingStopPercent, "Trailing stop distance %");
   const trailingCheckIntervalSec = parsePositiveInteger(input.trailingCheckIntervalSec, "Trailing check interval (sec)");
+  const positionSyncCheckIntervalSec = parsePositiveInteger(
+    input.positionSyncCheckIntervalSec,
+    "Position size sync check interval (sec)"
+  );
 
   // Если задан TP, он закроет позицию раньше, чем сработает более дальний триггер трейлинга —
   // тот никогда не успеет включиться. Требуем строго меньше (не "<="), иначе достижение обеих
@@ -311,7 +319,8 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
       trailingEnabled: input.trailingEnabled,
       trailingTriggerPercent,
       trailingStopPercent,
-      trailingCheckIntervalSec
+      trailingCheckIntervalSec,
+      positionSyncCheckIntervalSec
     },
     logging: currentConfig.logging
   };

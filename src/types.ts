@@ -69,6 +69,23 @@ export interface TrailingLogEntry {
   error: string | null;
 }
 
+export type PositionSyncStatus = "applied" | "failed";
+
+export type PositionSyncOrderKind = "TP" | "SL" | "SL_BACKUP";
+
+export interface PositionSyncLogEntry {
+  ts: number;
+  symbol: string;
+  side: OrderSide;
+  positionSize: number;
+  orderKind: PositionSyncOrderKind;
+  orderId: string;
+  previousQty: number;
+  newQty: number;
+  status: PositionSyncStatus;
+  error: string | null;
+}
+
 export interface OrderLogEntry {
   ts: number;
   symbol: string;

@@ -28,12 +28,14 @@ const configSchema = z.object({
     trailingTriggerPercent: z.number().positive().nullish().transform((v) => v ?? 5),
     trailingStopPercent: z.number().positive().nullish().transform((v) => v ?? 1),
     trailingCheckIntervalSec: z.number().int().positive().nullish().transform((v) => v ?? 60),
+    positionSyncCheckIntervalSec: z.number().int().positive().nullish().transform((v) => v ?? 10),
   }),
   logging: z.object({
     signalsLogPath: z.string().min(1),
     ordersLogPath: z.string().min(1),
     breakevenLogPath: z.string().min(1).nullish().transform((v) => v ?? "./logs/breakeven.log"),
     trailingLogPath: z.string().min(1).nullish().transform((v) => v ?? "./logs/trailing.log"),
+    positionSyncLogPath: z.string().min(1).nullish().transform((v) => v ?? "./logs/position-sync.log"),
   }),
 });
 

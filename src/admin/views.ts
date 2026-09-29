@@ -302,7 +302,7 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
       <h2 class="h6 text-uppercase text-secondary">Position size sync</h2>
       <div class="row g-3">
         <div class="col-md-6">
-          ${labelWithHelp("positionSyncCheckIntervalSec", "Check interval (sec)", "How often, in seconds, a background monitor compares each open position's actual size against its TP limit order and both SL orders (main + backup), and amends any that are stale (e.g. after a manual partial close) to the new size — without moving their price/trigger. Always on, independent of the breakeven/trailing toggles above.")}
+          ${labelWithHelp("positionSyncCheckIntervalSec", "Check interval (sec)", "How often, in seconds, a background monitor compares each open position's actual size against its TP limit order and both SL orders (main + backup), and shrinks any that are now larger than the position (e.g. after a manual partial close) down to match — without moving their price/trigger. Never increases an order's size, so a deliberately smaller manual reduce-only order (e.g. your own partial take-profit) is left alone. Always on, independent of the breakeven/trailing toggles above.")}
           <input class="form-control" id="positionSyncCheckIntervalSec" name="positionSyncCheckIntervalSec" value="${escapeHtml(values.positionSyncCheckIntervalSec)}" inputmode="numeric" required>
         </div>
       </div>

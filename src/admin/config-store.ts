@@ -28,6 +28,8 @@ export type EnvFormValues = {
   trailingStopPercent: string;
   trailingCheckIntervalSec: string;
   positionSyncCheckIntervalSec: string;
+  marketTpSlConversionEnabled: boolean;
+  marketTpSlConversionCheckIntervalSec: string;
 };
 
 export type LoadedEnv = {
@@ -68,6 +70,8 @@ type TradingConfig = {
     trailingStopPercent: number;
     trailingCheckIntervalSec: number;
     positionSyncCheckIntervalSec: number;
+    marketTpSlConversionEnabled?: boolean;
+    marketTpSlConversionCheckIntervalSec?: number;
   };
   logging: {
     signalsLogPath: string;
@@ -234,7 +238,9 @@ export async function loadEnv(): Promise<LoadedEnv> {
       trailingTriggerPercent: String(config.trading.trailingTriggerPercent ?? 5),
       trailingStopPercent: String(config.trading.trailingStopPercent ?? 1),
       trailingCheckIntervalSec: String(config.trading.trailingCheckIntervalSec ?? 60),
-      positionSyncCheckIntervalSec: String(config.trading.positionSyncCheckIntervalSec ?? 10)
+      positionSyncCheckIntervalSec: String(config.trading.positionSyncCheckIntervalSec ?? 10),
+      marketTpSlConversionEnabled: config.trading.marketTpSlConversionEnabled ?? false,
+      marketTpSlConversionCheckIntervalSec: String(config.trading.marketTpSlConversionCheckIntervalSec ?? 10)
     }
   };
 }
@@ -288,6 +294,10 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
     input.positionSyncCheckIntervalSec,
     "Position size sync check interval (sec)"
   );
+  const marketTpSlConversionCheckIntervalSec = parsePositiveInteger(
+    input.marketTpSlConversionCheckIntervalSec,
+    "Market TP/SL conversion check interval (sec)"
+  );
 
   // Если задан TP, он закроет позицию раньше, чем сработает более дальний триггер трейлинга —
   // тот никогда не успеет включиться. Требуем строго меньше (не "<="), иначе достижение обеих
@@ -320,7 +330,9 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
       trailingTriggerPercent,
       trailingStopPercent,
       trailingCheckIntervalSec,
-      positionSyncCheckIntervalSec
+      positionSyncCheckIntervalSec,
+      marketTpSlConversionEnabled: input.marketTpSlConversionEnabled,
+      marketTpSlConversionCheckIntervalSec
     },
     logging: currentConfig.logging
   };

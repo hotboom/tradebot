@@ -9,10 +9,12 @@ import { OrdersLogger } from "./logging/ordersLogger";
 import { BreakevenLogger } from "./logging/breakevenLogger";
 import { TrailingLogger } from "./logging/trailingLogger";
 import { PositionSyncLogger } from "./logging/positionSyncLogger";
+import { MarketTpSlConversionLogger } from "./logging/marketTpSlConversionLogger";
 import { OrderExecutor } from "./executor";
 import { BreakevenMonitor } from "./breakevenMonitor";
 import { TrailingStopMonitor } from "./trailingStopMonitor";
 import { PositionSizeSyncMonitor } from "./positionSizeSyncMonitor";
+import { MarketTpSlConversionMonitor } from "./marketTpSlConversionMonitor";
 import { SymbolQueue } from "./util/symbolQueue";
 import { DedupStore } from "./dedupStore";
 import { PositionRateLimiter } from "./positionRateLimiter";
@@ -30,6 +32,7 @@ async function main(): Promise<void> {
   const breakevenLogger = new BreakevenLogger(config.logging.breakevenLogPath);
   const trailingLogger = new TrailingLogger(config.logging.trailingLogPath);
   const positionSyncLogger = new PositionSyncLogger(config.logging.positionSyncLogPath);
+  const marketTpSlConversionLogger = new MarketTpSlConversionLogger(config.logging.marketTpSlConversionLogPath);
   const dedupStore = new DedupStore(
     path.join(path.dirname(path.resolve(config.logging.signalsLogPath)), "processed_signals.log")
   );
@@ -45,6 +48,12 @@ async function main(): Promise<void> {
   const breakevenMonitor = new BreakevenMonitor(config, bybitClient, breakevenLogger, symbolQueue);
   const trailingStopMonitor = new TrailingStopMonitor(config, bybitClient, trailingLogger, symbolQueue);
   const positionSizeSyncMonitor = new PositionSizeSyncMonitor(config, bybitClient, positionSyncLogger, symbolQueue);
+  const marketTpSlConversionMonitor = new MarketTpSlConversionMonitor(
+    config,
+    bybitClient,
+    marketTpSlConversionLogger,
+    symbolQueue
+  );
   const executor = new OrderExecutor(
     config,
     bybitClient,
@@ -61,6 +70,8 @@ async function main(): Promise<void> {
   breakevenMonitor.start();
   trailingStopMonitor.start();
   positionSizeSyncMonitor.start();
+  // Работает постоянно (если включён), независимо от входов бота — см. MarketTpSlConversionMonitor.
+  marketTpSlConversionMonitor.start();
 
   const app = Fastify({ logger: true });
 

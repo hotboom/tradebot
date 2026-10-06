@@ -121,7 +121,7 @@ export async function replacePositionStop(
   for (const order of params.staleOrders) {
     if (order.stopOrderType === "PartialTakeProfit") continue;
     try {
-      await client.cancelOrder({ symbol, orderId: order.orderId });
+      await client.cancelRiskOrder({ symbol, orderId: order.orderId, stopOrderType: order.stopOrderType });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       cleanupError = cleanupError ? `${cleanupError}; ${msg}` : msg;

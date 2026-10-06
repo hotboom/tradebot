@@ -86,6 +86,28 @@ export interface PositionSyncLogEntry {
   error: string | null;
 }
 
+export type MarketTpSlConversionStatus = "applied" | "failed";
+
+export interface MarketTpSlConversionLogEntry {
+  ts: number;
+  symbol: string;
+  side: OrderSide;
+  positionSize: number;
+  /** Какой ордер переделывали: маркетный SL → лимитный SL (+ резервный маркет) или маркетный TP → лимитный TP. */
+  leg: "SL" | "TP";
+  /** orderId и stopOrderType снятого маркетного ордера. */
+  oldOrderId: string;
+  oldStopOrderType: string;
+  /** Цена нового ордера (= триггер старого маркетного). */
+  price: number;
+  /** Фактический тип нового SL (Limit, либо Market при фоллбэке); null для TP. */
+  slOrderType: "Limit" | "Market" | null;
+  /** Триггер резервного market-SL; null — не встал или это TP. */
+  backupStopLoss: number | null;
+  status: MarketTpSlConversionStatus;
+  error: string | null;
+}
+
 export interface OrderLogEntry {
   ts: number;
   symbol: string;

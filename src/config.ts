@@ -29,6 +29,8 @@ const configSchema = z.object({
     trailingStopPercent: z.number().positive().nullish().transform((v) => v ?? 1),
     trailingCheckIntervalSec: z.number().int().positive().nullish().transform((v) => v ?? 60),
     positionSyncCheckIntervalSec: z.number().int().positive().nullish().transform((v) => v ?? 10),
+    marketTpSlConversionEnabled: z.boolean().nullish().transform((v) => v ?? false),
+    marketTpSlConversionCheckIntervalSec: z.number().int().positive().nullish().transform((v) => v ?? 10),
   }),
   logging: z.object({
     signalsLogPath: z.string().min(1),
@@ -36,6 +38,11 @@ const configSchema = z.object({
     breakevenLogPath: z.string().min(1).nullish().transform((v) => v ?? "./logs/breakeven.log"),
     trailingLogPath: z.string().min(1).nullish().transform((v) => v ?? "./logs/trailing.log"),
     positionSyncLogPath: z.string().min(1).nullish().transform((v) => v ?? "./logs/position-sync.log"),
+    marketTpSlConversionLogPath: z
+      .string()
+      .min(1)
+      .nullish()
+      .transform((v) => v ?? "./logs/market-tpsl-conversion.log"),
   }),
 });
 

@@ -307,6 +307,20 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
         </div>
       </div>
       <hr class="my-4">
+      <h2 class="h6 text-uppercase text-secondary">Market TP/SL → limit</h2>
+      <div class="row g-3">
+        <div class="col-12">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch" id="marketTpSlConversionEnabled" name="marketTpSlConversionEnabled" value="true" ${values.marketTpSlConversionEnabled ? "checked" : ""}>
+            <label class="form-check-label" for="marketTpSlConversionEnabled">Convert market TP/SL to limit${helpIcon("When on, a background monitor looks at every open position (including ones opened manually in the Bybit app) and, if it has exactly one MARKET take-profit and one MARKET stop-loss and nothing else, replaces them with the bot's scheme at the same prices: a reduce-only limit TP, a limit SL, and an independent backup market SL slightly further out. The new SL and backup are placed before the old market SL is removed, and the old market TP is removed only after the limit TP is placed, so the position is never left unprotected. Positions with any other combination of orders are left alone. Runs continuously while enabled, independent of Position size sync and breakeven/trailing.")}</label>
+          </div>
+        </div>
+        <div class="col-md-6">
+          ${labelWithHelp("marketTpSlConversionCheckIntervalSec", "Check interval (sec)", "How often, in seconds, the monitor checks open positions for a market TP + market SL pair to convert.")}
+          <input class="form-control" id="marketTpSlConversionCheckIntervalSec" name="marketTpSlConversionCheckIntervalSec" value="${escapeHtml(values.marketTpSlConversionCheckIntervalSec)}" inputmode="numeric" required>
+        </div>
+      </div>
+      <hr class="my-4">
       <h2 class="h6 text-uppercase text-secondary">Bybit API</h2>
       <div class="mb-3">
         ${labelWithHelp("bybitApiKey", "BYBIT_API_KEY", "API key for your Bybit account, used to place and manage orders.")}

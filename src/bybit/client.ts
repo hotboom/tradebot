@@ -90,6 +90,10 @@ export interface OpenStopOrder {
   /** "PartialStopLoss" / "PartialTakeProfit" — часть SL/TP позиции (setTradingStop, tpslMode
    * "Partial"); "Stop" — независимый резервный market-ордер (submitStopMarketOrder). */
   stopOrderType: string;
+  /** "Market" / "Limit" — как ордер исполнится по срабатыванию триггера. Нужен
+   * PositionSizeSyncMonitor, чтобы распознать маркетные TP/SL (например, выставленные вручную
+   * в приложении) и переделать их в лимитные. */
+  orderType: string;
   /** Триггерная цена ордера — для PartialStopLoss/PartialTakeProfit совпадает с ценой,
    * переданной в setTradingStop (slLimitPrice/tpLimitPrice ставятся туда же). */
   triggerPrice: number;
@@ -518,6 +522,34 @@ export class BybitClient {
     throw new Error(`cancelOrder failed: ${res.retCode} ${res.retMsg}`);
   }
 
+  /** Снятие условного ордера риск-менеджмента позиции. Partial SL/TP и независимый backup-SL
+   * снимаются обычным cancelOrder по orderId. TP/SL в tpslMode "Full" (stopOrderType
+   * "TakeProfit"/"StopLoss" — так их ставит приложение Bybit при ручном открытии позиции)
+   * привязаны к самой позиции: если cancelOrder по ним отбит, снимаем документированным способом —
+   * setTradingStop в режиме Full с нулём в соответствующей ноге (вторая нога не передаётся и
+   * остаётся как есть). */
+  async cancelRiskOrder(params: { symbol: string; orderId: string; stopOrderType: string }): Promise<void> {
+    const fullLeg =
+      params.stopOrderType === "TakeProfit" ? "takeProfit" : params.stopOrderType === "StopLoss" ? "stopLoss" : null;
+    try {
+      await this.cancelOrder({ symbol: params.symbol, orderId: params.orderId });
+    } catch (err) {
+      if (!fullLeg) throw err;
+      const res = await this.rest.setTradingStop({
+        category: "linear",
+        symbol: params.symbol,
+        positionIdx: 0,
+        tpslMode: "Full",
+        [fullLeg]: "0",
+      } as never);
+      if (res.retCode !== 0) {
+        throw new Error(
+          `cancel full ${fullLeg} failed: ${err instanceof Error ? err.message : String(err)}; setTradingStop: ${res.retCode} ${res.retMsg}`
+        );
+      }
+    }
+  }
+
   /** Все наши условные ордера риск-менеджмента позиции, резидентные на бирже для символа:
    * независимый backup-SL (submitStopMarketOrder, stopOrderType "Stop") и Partial SL самой
    * позиции (setTradingStop, stopOrderType "PartialStopLoss"). Может также вернуть легаси
@@ -540,6 +572,7 @@ export class BybitClient {
     return (res.result.list ?? []).map((order) => ({
       orderId: order.orderId,
       stopOrderType: order.stopOrderType,
+      orderType: order.orderType,
       triggerPrice: Number(order.triggerPrice),
       qty: Number(order.qty),
     }));

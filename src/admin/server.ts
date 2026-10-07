@@ -84,6 +84,10 @@ function clearSessionCookie(res: ServerResponse, req: IncomingMessage): void {
   res.setHeader("Set-Cookie", parts.join("; "));
 }
 
+function isAjax(req: IncomingMessage): boolean {
+  return req.headers["x-admin-ajax"] === "1";
+}
+
 function parseAdminRoute(pathname: string): AdminRoute | null {
   const parts = pathname.split("/").filter(Boolean);
   if (parts[0] !== "admin") {
@@ -110,22 +114,22 @@ function parseAdminRoute(pathname: string): AdminRoute | null {
 
 function successNotice(url: URL): Notice | undefined {
   if (url.searchParams.get("restarted") === "1") {
-    return { type: "success", message: "Bot restarted." };
+    return { type: "success", message: "Bot restarted.", key: "noticeRestarted" };
   }
 
   if (url.searchParams.get("trading") === "stopped") {
-    return { type: "success", message: "Trading stopped. New signals will be rejected until you resume." };
+    return { type: "success", message: "Trading stopped. New signals will be rejected until you resume.", key: "noticeTradingStopped" };
   }
 
   if (url.searchParams.get("trading") === "resumed") {
-    return { type: "success", message: "Trading resumed." };
+    return { type: "success", message: "Trading resumed.", key: "noticeTradingResumed" };
   }
 
   if (url.searchParams.get("saved") !== "1") {
     return undefined;
   }
 
-  return { type: "success", message: "Settings saved. Bot restarted." };
+  return { type: "success", message: "Settings saved. Bot restarted.", key: "noticeSaved" };
 }
 
 async function readForm(req: IncomingMessage): Promise<URLSearchParams> {
@@ -179,7 +183,7 @@ function envFromForm(form: URLSearchParams): EnvFormValues {
 async function handleLoginGet(res: ServerResponse, url: URL): Promise<void> {
   const notice: Notice | undefined =
     url.searchParams.get("expired") === "1"
-      ? { type: "danger", message: "Session expired. Please sign in again." }
+      ? { type: "danger", message: "Session expired. Please sign in again.", key: "sessionExpired" }
       : undefined;
   send(res, 200, renderLoginPage(notice));
 }
@@ -195,7 +199,7 @@ async function handleLoginPost(
   const rememberMe = form.get("remember") === "true";
 
   if (!safeEqual(username, credentials.username) || !safeEqual(password, credentials.password)) {
-    send(res, 401, renderLoginPage({ type: "danger", message: "Invalid username or password." }));
+    send(res, 401, renderLoginPage({ type: "danger", message: "Invalid username or password.", key: "invalidCreds" }));
     return;
   }
 
@@ -264,6 +268,11 @@ async function handlePost(req: IncomingMessage, res: ServerResponse, route: Admi
 
   const form = await readForm(req);
   await saveEnv(envFromForm(form));
+  // Страница настроек сохраняет через fetch и сама перезапускает бота; без JS — старый редирект.
+  if (isAjax(req)) {
+    send(res, 200, JSON.stringify({ ok: true }), "application/json; charset=utf-8");
+    return;
+  }
   redirect(res, "/admin/restarting?notice=saved");
 }
 
@@ -312,7 +321,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, credenti
       redirect(res, "/admin/login");
       return;
     }
-    send(res, 401, renderLoginPage({ type: "danger", message: "Session expired. Please sign in again." }));
+    send(res, 401, renderLoginPage({ type: "danger", message: "Session expired. Please sign in again.", key: "sessionExpired" }));
     return;
   }
 
@@ -332,6 +341,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, credenti
     const message = error instanceof Error ? error.message : "Unknown error";
     if (route.section === "restart") {
       send(res, 400, message, "text/plain; charset=utf-8");
+      return;
+    }
+    if (isAjax(req)) {
+      send(res, 400, JSON.stringify({ ok: false, error: message }), "application/json; charset=utf-8");
       return;
     }
     const notice: Notice = { type: "danger", message };

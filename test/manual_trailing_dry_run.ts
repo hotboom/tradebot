@@ -25,12 +25,13 @@ async function main(): Promise<void> {
 
   const { side, avgPrice, markPrice } = position;
   const sign = side === "Buy" ? 1 : -1;
-  const profitPercent = ((markPrice - avgPrice) / avgPrice) * 100 * sign;
 
-  const [instrument, stopOrders] = await Promise.all([
+  const [instrument, stopOrders, lastPrice] = await Promise.all([
     client.getInstrumentInfo(symbol),
     client.getOpenStopOrders(symbol),
+    client.getLastPrice(symbol),
   ]);
+  const profitPercent = ((lastPrice - avgPrice) / avgPrice) * 100 * sign;
 
   console.log("[dry-run] resident stop orders (the ones the monitor actually checks):", stopOrders);
   const existingSl = stopOrders.find((o) => o.stopOrderType === "PartialStopLoss");
@@ -40,9 +41,9 @@ async function main(): Promise<void> {
   const trailingDistance = config.trading.trailingStopPercent / 100;
   const triggered = profitPercent >= triggerPercent;
 
-  const candidatePrice = roundToTick(markPrice * (1 - sign * trailingDistance), instrument.tickSize);
+  const candidatePrice = roundToTick(lastPrice * (1 - sign * trailingDistance), instrument.tickSize);
   const backupPrice = roundToTick(
-    markPrice * (1 - sign * trailingDistance * SL_BACKUP_BUFFER_MULTIPLIER),
+    lastPrice * (1 - sign * trailingDistance * SL_BACKUP_BUFFER_MULTIPLIER),
     instrument.tickSize
   );
 
@@ -50,7 +51,7 @@ async function main(): Promise<void> {
     existingSl === undefined ||
     (side === "Buy" ? candidatePrice > existingSl.triggerPrice : candidatePrice < existingSl.triggerPrice);
 
-  console.log(`[dry-run] side=${side} avgPrice=${avgPrice} markPrice=${markPrice}`);
+  console.log(`[dry-run] side=${side} avgPrice=${avgPrice} lastPrice=${lastPrice} markPrice=${markPrice}`);
   console.log(
     `[dry-run] profitPercent=${profitPercent.toFixed(4)}% trigger=${triggerPercent}% -> ${
       triggered ? "TRIGGERED" : "not yet"
@@ -58,7 +59,7 @@ async function main(): Promise<void> {
   );
   console.log(`[dry-run] existing PartialStopLoss trigger=${existingSl ? existingSl.triggerPrice : null}`);
   console.log(`[dry-run] existing PartialTakeProfit trigger=${existingTp ? existingTp.triggerPrice : null}`);
-  console.log(`[dry-run] would-be trailing SL (Limit)=${candidatePrice} (distance ${config.trading.trailingStopPercent}% from markPrice)`);
+  console.log(`[dry-run] would-be trailing SL (Limit)=${candidatePrice} (distance ${config.trading.trailingStopPercent}% from lastPrice)`);
   console.log(`[dry-run] would-be backup SL (Market)=${backupPrice}`);
   console.log(
     `[dry-run] would move stop now? ${triggered && isImprovement} ` +

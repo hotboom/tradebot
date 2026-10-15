@@ -11,8 +11,11 @@ const LOG_TAG = "[trailing]";
 /**
  * Периодически проверяет все открытые позиции и, как только позиция ушла в плюс минимум на
  * trading.trailingTriggerPercent от цены входа, подтягивает стоп-лосс вслед за ценой — на
- * trading.trailingStopPercent хуже ТЕКУЩЕЙ цены (не от входа, как в breakeven, а от markPrice —
- * классический trailing-stop). Стоп двигается только вперёд, в сторону прибыли: если цена
+ * trading.trailingStopPercent хуже ТЕКУЩЕЙ цены (не от входа, как в breakeven, а от lastPrice —
+ * классический trailing-stop). Всё считается по lastPrice, а не по markPrice: SL на бирже
+ * триггерится по LastPrice, так что дистанция до срабатывания совпадает с настройкой даже при
+ * большом разрыве mark/last (markPrice пишется в лог только для сравнения).
+ * Стоп двигается только вперёд, в сторону прибыли: если цена
  * откатывается против позиции, новый кандидат оказывается хуже уже выставленного стопа и монитор
  * его не трогает — стоп остаётся на лучшей достигнутой точке.
  *
@@ -89,19 +92,19 @@ export class TrailingStopMonitor {
   private async checkPosition(position: OpenPositionSummary): Promise<void> {
     const { symbol, side, avgPrice, markPrice, size } = position;
     const sign = side === "Buy" ? 1 : -1;
-    const profitPercent = (((markPrice - avgPrice) / avgPrice) * 100) * sign;
-    if (profitPercent < this.config.trading.trailingTriggerPercent) return;
+    const lastPrice = await this.client.getLastPrice(symbol);
+    const profitPercent = (((lastPrice - avgPrice) / avgPrice) * 100) * sign;
+    if (!Number.isFinite(profitPercent) || profitPercent < this.config.trading.trailingTriggerPercent) return;
 
-    const [instrument, stopOrders, lastPrice] = await Promise.all([
+    const [instrument, stopOrders] = await Promise.all([
       this.client.getInstrumentInfo(symbol),
       this.client.getOpenStopOrders(symbol),
-      this.client.getLastPrice(symbol),
     ]);
 
     const trailingDistance = this.config.trading.trailingStopPercent / 100;
     // Кандидат — на trailingStopPercent хуже ТЕКУЩЕЙ цены (не от входа), как и должен себя
     // вести trailing-stop.
-    const candidatePrice = roundToTick(markPrice * (1 - sign * trailingDistance), instrument.tickSize);
+    const candidatePrice = roundToTick(lastPrice * (1 - sign * trailingDistance), instrument.tickSize);
 
     // См. комментарий в breakevenMonitor.ts про tpslMode "Partial": SL позиции виден только
     // как независимый резидентный ордер (stopOrderType "PartialStopLoss"), а не в поле
@@ -117,6 +120,7 @@ export class TrailingStopMonitor {
         side,
         avgPrice,
         markPrice,
+        lastPrice,
         profitPercent,
         previousStopLoss: existingSl ? existingSl.triggerPrice : null,
         newStopLoss: candidatePrice,
@@ -136,9 +140,9 @@ export class TrailingStopMonitor {
       (side === "Buy" ? candidatePrice > existingSl.triggerPrice : candidatePrice < existingSl.triggerPrice);
     if (!isImprovement) return;
 
-    // Кандидат посчитан от markPrice из snapshot позиции — на резко пилящем рынке он легко
-    // оказывается уже не с той стороны текущей цены, и Bybit отбил бы setTradingStop (retCode
-    // 10001). Не трогаем существующий стоп, ждём следующего тика с актуальной ценой.
+    // Кандидат посчитан от lastPrice, так что он по построению с правильной стороны; проверка —
+    // страховка от вырожденных настроек (trailingStopPercent <= 0), иначе Bybit отбил бы
+    // setTradingStop (retCode 10001). Не трогаем существующий стоп, ждём следующего тика.
     if (!stopLossOnValidSide(side, candidatePrice, lastPrice)) {
       console.warn(
         `${LOG_TAG} ${symbol} кандидат трейлинг-стопа ${candidatePrice} не с той стороны цены ${lastPrice}, пропускаем тик`
@@ -147,7 +151,7 @@ export class TrailingStopMonitor {
     }
 
     const backupPrice = roundToTick(
-      markPrice * (1 - sign * trailingDistance * SL_BACKUP_BUFFER_MULTIPLIER),
+      lastPrice * (1 - sign * trailingDistance * SL_BACKUP_BUFFER_MULTIPLIER),
       instrument.tickSize
     );
 
@@ -182,6 +186,7 @@ export class TrailingStopMonitor {
         side,
         avgPrice,
         markPrice,
+        lastPrice,
         profitPercent,
         previousStopLoss: existingSl ? existingSl.triggerPrice : null,
         newStopLoss: candidatePrice,
@@ -202,6 +207,7 @@ export class TrailingStopMonitor {
         side,
         avgPrice,
         markPrice,
+        lastPrice,
         profitPercent,
         previousStopLoss: existingSl ? existingSl.triggerPrice : null,
         newStopLoss: candidatePrice,

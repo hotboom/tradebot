@@ -89,14 +89,17 @@ export class BreakevenMonitor {
   private async checkPosition(position: OpenPositionSummary): Promise<void> {
     const { symbol, side, avgPrice, markPrice, size } = position;
     const sign = side === "Buy" ? 1 : -1;
-    const profitPercent = (((markPrice - avgPrice) / avgPrice) * 100) * sign;
-    if (profitPercent < this.config.trading.breakevenTriggerPercent) return;
+    // Порог считаем по lastPrice, а не по markPrice: SL на бирже триггерится по LastPrice, и
+    // при большом разрыве mark/last решение по mark расходится с реальной прибылью
+    // (markPrice пишется в лог только для сравнения).
+    const lastPrice = await this.client.getLastPrice(symbol);
+    const profitPercent = (((lastPrice - avgPrice) / avgPrice) * 100) * sign;
+    if (!Number.isFinite(profitPercent) || profitPercent < this.config.trading.breakevenTriggerPercent) return;
 
-    const [instrument, feeRate, stopOrders, lastPrice] = await Promise.all([
+    const [instrument, feeRate, stopOrders] = await Promise.all([
       this.client.getInstrumentInfo(symbol),
       this.client.getFeeRate(symbol),
       this.client.getOpenStopOrders(symbol),
-      this.client.getLastPrice(symbol),
     ]);
 
     // Безубыток с учётом комиссии: цена, при закрытии по которой (по тейкеру, худший случай)
@@ -126,6 +129,7 @@ export class BreakevenMonitor {
         side,
         avgPrice,
         markPrice,
+        lastPrice,
         profitPercent,
         previousStopLoss: existingSl ? existingSl.triggerPrice : null,
         newStopLoss: breakevenPrice,
@@ -145,8 +149,8 @@ export class BreakevenMonitor {
       (side === "Buy" ? existingSl.triggerPrice >= breakevenPrice : existingSl.triggerPrice <= breakevenPrice);
     if (alreadyProtected) return;
 
-    // Цена безубытка не с той стороны текущей цены (быстрый рынок ушёл дальше, чем markPrice
-    // из snapshot позиции) — Bybit отбил бы setTradingStop (retCode 10001). Не трогаем
+    // Цена безубытка не с той стороны текущей цены (прибыль меньше дистанции безубытка, если
+    // breakevenTriggerPercent настроен ниже комиссии + extra) — Bybit отбил бы setTradingStop (retCode 10001). Не трогаем
     // существующий стоп, ждём следующего тика.
     if (!stopLossOnValidSide(side, breakevenPrice, lastPrice)) {
       console.warn(
@@ -193,6 +197,7 @@ export class BreakevenMonitor {
         side,
         avgPrice,
         markPrice,
+        lastPrice,
         profitPercent,
         previousStopLoss: existingSl ? existingSl.triggerPrice : null,
         newStopLoss: breakevenPrice,
@@ -213,6 +218,7 @@ export class BreakevenMonitor {
         side,
         avgPrice,
         markPrice,
+        lastPrice,
         profitPercent,
         previousStopLoss: existingSl ? existingSl.triggerPrice : null,
         newStopLoss: breakevenPrice,

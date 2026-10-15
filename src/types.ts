@@ -43,6 +43,8 @@ export interface BreakevenLogEntry {
   side: OrderSide;
   avgPrice: number;
   markPrice: number;
+  /** Цена, от которой считаются profitPercent и стоп (по ней же Bybit триггерит SL). */
+  lastPrice: number;
   profitPercent: number;
   previousStopLoss: number | null;
   newStopLoss: number;
@@ -60,6 +62,8 @@ export interface TrailingLogEntry {
   side: OrderSide;
   avgPrice: number;
   markPrice: number;
+  /** Цена, от которой считаются profitPercent и стоп (по ней же Bybit триггерит SL). */
+  lastPrice: number;
   profitPercent: number;
   previousStopLoss: number | null;
   newStopLoss: number;

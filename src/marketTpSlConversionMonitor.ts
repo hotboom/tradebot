@@ -18,21 +18,23 @@ const TP_STOP_ORDER_TYPES = new Set(["TakeProfit", "PartialTakeProfit"]);
 const SL_STOP_ORDER_TYPES = new Set(["StopLoss", "PartialStopLoss"]);
 
 /**
- * Переделывает маркетные TP + SL позиции в схему бота: лимитный TP + лимитный SL + независимый
+ * Переделывает маркетные TP и/или SL позиции в схему бота: лимитный TP, лимитный SL + независимый
  * резервный market-SL.
  *
- * Срабатывает, только если у позиции ровно два условных ордера — один МАРКЕТНЫЙ TP и один
- * МАРКЕТНЫЙ SL — и нет reduce-only лимитника (TP бота). Типичный случай — позиция, открытая
- * вручную в приложении Bybit с TP/SL (tpslMode "Full", оба Market). Любая другая комбинация
- * означает, что позицией уже управляет бот или там что-то нестандартное, — не трогаем.
+ * TP и SL обрабатываются независимо — достаточно, чтобы стоял хотя бы один из них (например,
+ * в приложении Bybit выставлен только SL). SL переделывается, если у позиции ровно один SL и он
+ * маркетный (и в настройках stopLossOrderType "limit"); TP — если ровно один условный TP, он
+ * маркетный и нет reduce-only лимитника (TP бота). Типичный случай — позиция, открытая или
+ * поправленная вручную в приложении Bybit (tpslMode "Full", Market). Остальные комбинации
+ * означают, что позицией уже управляет бот или там что-то нестандартное, — не трогаем.
  *
  * Цены сохраняются: лимитный TP — по триггеру старого TP, лимитный SL — по триггеру старого SL.
  * Резервный market-SL — дальше лимитного на ту же долю, что у входа/безубытка
  * (SL_BACKUP_BUFFER_MULTIPLIER от дистанции avgPrice→SL), но не меньше одного тика.
  *
  * Порядок безопасный: сначала SL через replacePositionStop (новый лимитный SL + backup встают ДО
- * снятия старого маркетного; при полном провале старый остаётся на месте), затем лимитный TP и
- * только после его подтверждения — снятие маркетного TP.
+ * снятия старого маркетного; при полном провале старый остаётся на месте; если не удалось — TP в
+ * этот тик не трогаем), затем лимитный TP и только после его подтверждения — снятие маркетного TP.
  *
  * Независим от PositionSizeSyncMonitor и breakeven/trailing: свой тумблер, интервал и лог. В
  * отличие от них НЕ останавливается при отсутствии позиций — ручная позиция может появиться в
@@ -87,41 +89,71 @@ export class MarketTpSlConversionMonitor {
     const failedAt = this.failedAt.get(symbol);
     if (failedAt !== undefined && Date.now() - failedAt < RETRY_AFTER_FAILURE_MS) return;
 
-    const [stopOrders, tpOrders] = await Promise.all([
+    const [stopOrders, tpLimitOrders] = await Promise.all([
       this.client.getOpenStopOrders(symbol),
       this.client.getOpenReduceOnlyLimitOrders(symbol),
     ]);
-    if (tpOrders.length > 0 || stopOrders.length !== 2) return;
-    const tpOrder = stopOrders.find((o) => TP_STOP_ORDER_TYPES.has(o.stopOrderType) && o.orderType === "Market");
-    const slOrder = stopOrders.find((o) => SL_STOP_ORDER_TYPES.has(o.stopOrderType) && o.orderType === "Market");
-    if (!tpOrder || !slOrder) return;
 
-    const tp = tpOrder.triggerPrice;
-    const sl = slOrder.triggerPrice;
-    if (!(tp > 0) || !(sl > 0)) return;
+    // Каждая нога — независимо. SL: ровно один SL-ордер позиции, и он маркетный (лимитный SL бота
+    // или несколько SL — уже наша схема/что-то нестандартное, не трогаем). TP: ровно один условный
+    // TP, маркетный, и нет reduce-only лимитников (TP бота) — иначе суммарный объём TP превысил бы
+    // позицию. Резервный market-SL бота (stopOrderType "Stop") ни в одну группу не входит.
+    const slOrders = stopOrders.filter((o) => SL_STOP_ORDER_TYPES.has(o.stopOrderType));
+    const tpStopOrders = stopOrders.filter((o) => TP_STOP_ORDER_TYPES.has(o.stopOrderType));
+    // stopLossOrderType "market" в настройках — бот сам держит маркетные SL, переделывать их нельзя
+    // (иначе монитор воевал бы с executor/breakeven/trailing).
+    const slOrder =
+      this.config.trading.stopLossOrderType === "limit" && slOrders.length === 1 && slOrders[0].orderType === "Market"
+        ? slOrders[0]
+        : null;
+    const tpOrder =
+      tpLimitOrders.length === 0 && tpStopOrders.length === 1 && tpStopOrders[0].orderType === "Market"
+        ? tpStopOrders[0]
+        : null;
+    if (!slOrder && !tpOrder) return;
 
     const [instrument, lastPrice] = await Promise.all([
       this.client.getInstrumentInfo(symbol),
       this.client.getLastPrice(symbol),
     ]);
+    const base = { symbol, side, positionSize: size };
 
-    // Цена уже по ту сторону TP/SL (быстрый рынок, маркетный ордер вот-вот сработает сам) —
-    // лимитный SL биржа отобьёт, а лимитный TP исполнится сразу по рынку. Ждём следующего тика.
-    const tpOnValidSide = side === "Buy" ? tp > lastPrice : tp < lastPrice;
-    if (!tpOnValidSide || !stopLossOnValidSide(side, sl, lastPrice)) {
-      console.warn(`${LOG_TAG} ${symbol} TP ${tp} / SL ${sl} не с той стороны цены ${lastPrice}, пропускаем тик`);
-      return;
+    if (slOrder) {
+      const ok = await this.convertSl(base, slOrder, avgPrice, lastPrice, instrument.tickSize);
+      if (!ok) return;
+    }
+    if (tpOrder) {
+      const ok = await this.convertTp(base, tpOrder, lastPrice);
+      if (!ok) return;
+    }
+
+    this.failedAt.delete(symbol);
+  }
+
+  /** Маркетный SL → лимитный SL по тому же триггеру + резервный маркет; старый снимается после.
+   * false — нога не переделана (ошибка либо пропуск тика). */
+  private async convertSl(
+    base: { symbol: string; side: OrderSide; positionSize: number },
+    slOrder: OpenStopOrder,
+    avgPrice: number,
+    lastPrice: number,
+    tickSize: number
+  ): Promise<boolean> {
+    const { symbol, side, positionSize: size } = base;
+    const sl = slOrder.triggerPrice;
+    if (!(sl > 0)) return false;
+
+    // Цена уже по ту сторону SL (быстрый рынок, маркетный ордер вот-вот сработает сам) —
+    // лимитный SL биржа отобьёт. Ждём следующего тика.
+    if (!stopLossOnValidSide(side, sl, lastPrice)) {
+      console.warn(`${LOG_TAG} ${symbol} SL ${sl} не с той стороны цены ${lastPrice}, пропускаем тик`);
+      return false;
     }
 
     // Резерв всегда дальше от цены, чем основной SL: для лонга ниже, для шорта выше.
-    const backupOffset = Math.max(Math.abs(sl - avgPrice) * (SL_BACKUP_BUFFER_MULTIPLIER - 1), instrument.tickSize);
-    const backupStopLoss = placeablePrice(
-      roundToTick(side === "Buy" ? sl - backupOffset : sl + backupOffset, instrument.tickSize)
-    );
+    const backupOffset = Math.max(Math.abs(sl - avgPrice) * (SL_BACKUP_BUFFER_MULTIPLIER - 1), tickSize);
+    const backupStopLoss = placeablePrice(roundToTick(side === "Buy" ? sl - backupOffset : sl + backupOffset, tickSize));
 
-    const base = { symbol, side, positionSize: size };
-
-    // 1. SL: лимитный по тому же триггеру + резервный маркет; старый маркетный снимается после.
     let slResult: Awaited<ReturnType<typeof replacePositionStop>>;
     try {
       slResult = await replacePositionStop(this.client, {
@@ -137,8 +169,10 @@ export class MarketTpSlConversionMonitor {
       this.failedAt.set(symbol, Date.now());
       this.log(base, "SL", slOrder, sl, null, null, "failed", `${errorText(err)} — прежний маркетный SL сохранён`);
       console.error(`${LOG_TAG} ${symbol} failed to convert market SL (прежний SL сохранён):`, err);
-      return;
+      return false;
     }
+    // Биржа отбила лимитный SL и встал снова маркетный — не повторяем на каждом тике.
+    if (slResult.appliedSlOrderType === "Market") this.failedAt.set(symbol, Date.now());
     const slNotes = [
       slResult.limitFallbackReason ? `limit SL rejected, fell back to market SL: ${slResult.limitFallbackReason}` : null,
       slResult.appliedSlOrderType === "Limit" && !slResult.backupPlaced
@@ -161,8 +195,27 @@ export class MarketTpSlConversionMonitor {
       `${LOG_TAG} ${symbol} market SL -> ${slResult.appliedSlOrderType} SL ${sl}` +
         (placedBackup !== null ? ` + backup market SL ${placedBackup}` : "")
     );
+    return slResult.appliedSlOrderType === "Limit";
+  }
 
-    // 2. TP: лимитник по цене старого TP; старый маркетный снимаем только после того, как встал.
+  /** Маркетный TP → лимитник по цене старого TP; старый снимаем только после того, как встал.
+   * false — нога не переделана (ошибка либо пропуск тика). */
+  private async convertTp(
+    base: { symbol: string; side: OrderSide; positionSize: number },
+    tpOrder: OpenStopOrder,
+    lastPrice: number
+  ): Promise<boolean> {
+    const { symbol, side, positionSize: size } = base;
+    const tp = tpOrder.triggerPrice;
+    if (!(tp > 0)) return false;
+
+    // Цена уже за TP — лимитник исполнился бы сразу по рынку. Ждём следующего тика.
+    const tpOnValidSide = side === "Buy" ? tp > lastPrice : tp < lastPrice;
+    if (!tpOnValidSide) {
+      console.warn(`${LOG_TAG} ${symbol} TP ${tp} не с той стороны цены ${lastPrice}, пропускаем тик`);
+      return false;
+    }
+
     const closingSide: OrderSide = side === "Buy" ? "Sell" : "Buy";
     try {
       await this.client.submitTakeProfitLimitOrder({ symbol, side: closingSide, qty: size, price: tp });
@@ -170,7 +223,7 @@ export class MarketTpSlConversionMonitor {
       this.failedAt.set(symbol, Date.now());
       this.log(base, "TP", tpOrder, tp, null, null, "failed", `${errorText(err)} — прежний маркетный TP сохранён`);
       console.error(`${LOG_TAG} ${symbol} failed to place limit TP (прежний маркетный TP сохранён):`, err);
-      return;
+      return false;
     }
     let tpCleanupError: string | null = null;
     try {
@@ -180,8 +233,7 @@ export class MarketTpSlConversionMonitor {
     }
     this.log(base, "TP", tpOrder, tp, null, null, "applied", tpCleanupError);
     console.log(`${LOG_TAG} ${symbol} market TP -> limit TP ${tp}${tpCleanupError ? ` (${tpCleanupError})` : ""}`);
-
-    this.failedAt.delete(symbol);
+    return true;
   }
 
   private log(

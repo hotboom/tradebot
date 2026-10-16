@@ -96,8 +96,8 @@ const en = {
   sync: "Position size sync",
   syncD: "Shrinks TP/SL orders that are larger than the position (e.g. after a manual partial close). Never increases them. Always on.",
   conv: "Convert market TP/SL to limit",
-  convD: "If a position has exactly one market TP and one market SL (e.g. set in the Bybit app), replaces them with a limit TP, limit SL and backup market SL at the same prices. The position is never left unprotected.",
-  convIntD: "How often positions are checked for a market TP/SL pair.",
+  convD: "If a position has a market TP and/or a market SL (e.g. set in the Bybit app), replaces each of them with a limit TP / limit SL plus backup market SL at the same price. Works even if only one of them is set. The position is never left unprotected.",
+  convIntD: "How often positions are checked for market TP/SL.",
 
   // Bybit API
   apiKey: "API key",
@@ -232,8 +232,8 @@ const ru: Record<I18nKey, string> = {
   sync: "Синхронизация размера позиций",
   syncD: "Уменьшает TP/SL ордера, которые больше позиции (например, после ручного частичного закрытия). Никогда не увеличивает. Работает всегда.",
   conv: "Рыночные TP/SL → лимитные",
-  convD: "Если у позиции ровно один рыночный TP и один рыночный SL (например, выставленные в приложении Bybit), заменяет их на лимитный TP, лимитный SL и резервный рыночный SL по тем же ценам. Позиция ни на момент не остаётся без защиты.",
-  convIntD: "Как часто позиции проверяются на пару рыночных TP/SL.",
+  convD: "Если у позиции есть рыночный TP и/или рыночный SL (например, выставленные в приложении Bybit), заменяет каждый из них на лимитный TP / лимитный SL плюс резервный рыночный SL по той же цене. Работает, даже если стоит только один из них. Позиция ни на момент не остаётся без защиты.",
+  convIntD: "Как часто позиции проверяются на рыночные TP/SL.",
 
   apiKey: "API-ключ",
   apiKeyD: "API-ключ вашего аккаунта Bybit, через него бот выставляет ордера и управляет ими.",

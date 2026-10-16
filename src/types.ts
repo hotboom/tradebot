@@ -128,6 +128,9 @@ export interface OrderLogEntry {
   slOrderType: "Market" | "Limit" | null;
   slBackupPrice: number | null;
   tp: number | null;
+  /** Цена и объём частичного TP (partialTpEnabled); null/отсутствует — не ставился. */
+  partialTp?: number | null;
+  partialTpQty?: number | null;
   status: OrderStatus;
   bybitOrderId: string | null;
   error: string | null;

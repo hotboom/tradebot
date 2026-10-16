@@ -512,6 +512,14 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
             <option value="market"${values.stopLossOrderType === "market" ? " selected" : ""} data-i18n="market">${escapeHtml(I18N.en.market)}</option>
           </select></label>`
         )}
+        ${featureBlock(
+          "partialTpEnabled",
+          values.partialTpEnabled,
+          "ptp",
+          "ptpD",
+          subField("ptpAt", "partialTpPercent", values.partialTpPercent, { rule: "pos", unit: PCT }, "ptpAtD") +
+            subField("ptpSize", "partialTpSizePercent", values.partialTpSizePercent, { rule: "pos", unit: PCT }, "ptpSizeD")
+        )}
       </div>
     </section>
 

@@ -69,6 +69,12 @@ const en = {
   slOrder: "Stop loss order",
   slOrderD: "Market: guaranteed fill, taker fee. Limit: saves fees, plus a backup market stop 10% further out (2.2% for a 2% stop).",
   limitBackup: "Limit + backup market",
+  ptp: "Partial take profit",
+  ptpD: "Extra reduce-only limit order that closes part of the position at a closer price. The main take profit is placed on the rest.",
+  ptpAt: "Price at",
+  ptpAtD: "Distance from entry price, in percent. Must be below Take profit %.",
+  ptpSize: "Close part",
+  ptpSizeD: "Share of the position closed by this order, in percent (less than 100).",
 
   // Profit protection
   be: "Breakeven stop",
@@ -201,6 +207,12 @@ const ru: Record<I18nKey, string> = {
   slOrder: "Ордер стоп-лосса",
   slOrderD: "Рыночный: гарантированное исполнение, тейкерская комиссия. Лимитный: экономия на комиссии плюс резервный рыночный стоп на 10% дальше (2.2% при стопе 2%).",
   limitBackup: "Лимитный + резервный рыночный",
+  ptp: "Частичный тейк-профит",
+  ptpD: "Дополнительный reduce-only лимитный ордер, закрывающий часть позиции по более близкой цене. Основной тейк-профит ставится на остаток.",
+  ptpAt: "Цена на",
+  ptpAtD: "Расстояние от цены входа в процентах. Должно быть меньше тейк-профита %.",
+  ptpSize: "Закрыть часть",
+  ptpSizeD: "Какую долю позиции закрывает этот ордер, в процентах (меньше 100).",
 
   be: "Стоп в безубыток",
   beD: "Когда позиция в плюсе на % срабатывания, переносит стоп на цену входа (с учётом комиссий) плюс фиксируемую прибыль %. Лимитный стоп плюс резервный рыночный.",

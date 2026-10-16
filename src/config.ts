@@ -17,6 +17,11 @@ const configSchema = z.object({
     stopLossPercent: z.number().positive().nullish().transform((v) => v ?? null),
     stopLossOrderType: z.enum(["market", "limit"]).nullish().transform((v) => v ?? "market"),
     takeProfitPercent: z.number().positive().nullish().transform((v) => v ?? null),
+    // Частичный TP: отдельный reduce-only лимитник на partialTpSizePercent % позиции по цене
+    // entry ± partialTpPercent %. Основной TP при этом ставится на остаток позиции.
+    partialTpEnabled: z.boolean().nullish().transform((v) => v ?? false),
+    partialTpPercent: z.number().positive().nullish().transform((v) => v ?? 1),
+    partialTpSizePercent: z.number().positive().lt(100).nullish().transform((v) => v ?? 50),
     maxPositions: z.number().int().positive(),
     maxPositionsWindowSec: z.number().int().positive().nullish().transform((v) => v ?? 600),
     direction: z.enum(["both", "long", "short"]).default("both"),

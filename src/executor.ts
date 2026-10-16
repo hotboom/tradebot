@@ -45,6 +45,11 @@ export class OrderExecutor {
     let sl: number | null = null;
     let slBackup: number | null = null;
     let tp: number | null = null;
+    // Частичный TP (partialTpEnabled): цена, объём и объём основного TP на остаток позиции.
+    let partialTp: number | null = null;
+    let partialTpQty: number | null = null;
+    let tpRemainderQty: number | null = null;
+    let partialTpSkipReason: string | null = null;
     let orderId: string | null = null;
     let refMarketPrice: number | null = null;
 
@@ -104,6 +109,26 @@ export class OrderExecutor {
       );
       sl = placeablePrice(exits.stopLoss !== null ? roundToTick(exits.stopLoss, instrument.tickSize) : null);
       tp = placeablePrice(exits.takeProfit !== null ? roundToTick(exits.takeProfit, instrument.tickSize) : null);
+      if (this.config.trading.partialTpEnabled) {
+        const partialExits = calcExitPrices(side, fillPrice, null, this.config.trading.partialTpPercent);
+        const price = placeablePrice(
+          partialExits.takeProfit !== null ? roundToTick(partialExits.takeProfit, instrument.tickSize) : null
+        );
+        const total = positionQty as number;
+        const partQty = roundDownToStep((total * this.config.trading.partialTpSizePercent) / 100, instrument.qtyStep);
+        const restQty = roundToTick(total - partQty, instrument.qtyStep);
+        if (price === null) {
+          partialTpSkipReason = `partial TP skipped: некорректная цена после округления (tickSize ${instrument.tickSize})`;
+        } else if (!(partQty >= instrument.minOrderQty) || !(restQty >= instrument.minOrderQty)) {
+          // Позиция слишком мала, чтобы разделить её на две части не меньше минимального лота —
+          // ставим только основной TP на весь объём.
+          partialTpSkipReason = `partial TP skipped: ${partQty}/${restQty} из ${total} меньше minOrderQty ${instrument.minOrderQty}`;
+        } else {
+          partialTp = price;
+          partialTpQty = partQty;
+          tpRemainderQty = restQty;
+        }
+      }
       // exits вернул цену, а после округления она невалидна (0/NaN — например из-за кривого
       // tickSize у низкоценовой монеты): на биржу нулём НЕ шлём (Bybit воспримет 0 как снятие
       // стопа), фиксируем как ошибку в orders.log.
@@ -163,7 +188,7 @@ export class OrderExecutor {
     // Шаг 2 (вне критического пути): SL ставим на позицию через setTradingStop, TP — отдельным
     // reduce-only лимитным ордером (один ценник, виден в стакане, свободно двигается вручную в
     // приложении/на графике, в отличие от TP через setTradingStop с парой trigger/limit).
-    if (sl !== null || tp !== null) {
+    if (sl !== null || tp !== null || partialTp !== null) {
       const closingSide: OrderSide = side === "Buy" ? "Sell" : "Buy";
       const preferLimitSl = sl !== null && this.config.trading.stopLossOrderType === "limit";
       let appliedSlOrderType: "Market" | "Limit" | null = sl !== null ? (preferLimitSl ? "Limit" : "Market") : null;
@@ -240,7 +265,25 @@ export class OrderExecutor {
         }
       }
 
-      // TP — отдельным reduce-only лимитником на весь текущий объём позиции.
+      // Частичный TP — отдельный reduce-only лимитник на partialTpSizePercent % позиции. Ставим
+      // до основного: если он встал, основной TP сайзим на остаток, иначе — на весь объём.
+      let partialTpPlaced = false;
+      let partialTpOrderError: string | null = null;
+      if (partialTp !== null && partialTpQty !== null) {
+        try {
+          await this.client.submitTakeProfitLimitOrder({
+            symbol: signal.symbol,
+            side: closingSide,
+            qty: partialTpQty,
+            price: partialTp,
+          });
+          partialTpPlaced = true;
+        } catch (err) {
+          partialTpOrderError = err instanceof Error ? err.message : String(err);
+        }
+      }
+
+      // TP — отдельным reduce-only лимитником на текущий объём позиции (за вычетом частичного TP).
       let tpPlaced = false;
       let tpOrderError: string | null = null;
       if (tp !== null) {
@@ -248,7 +291,7 @@ export class OrderExecutor {
           await this.client.submitTakeProfitLimitOrder({
             symbol: signal.symbol,
             side: closingSide,
-            qty: positionQty as number,
+            qty: partialTpPlaced && tpRemainderQty !== null ? tpRemainderQty : (positionQty as number),
             price: tp,
           });
           tpPlaced = true;
@@ -264,6 +307,8 @@ export class OrderExecutor {
           ? `backup market SL not set: ${backupOrderError}`
           : null,
         tp !== null && !tpPlaced ? `TP limit order not set: ${tpOrderError}` : null,
+        partialTpSkipReason,
+        partialTp !== null && !partialTpPlaced ? `partial TP limit order not set: ${partialTpOrderError}` : null,
       ].filter((note): note is string => note !== null);
 
       this.ordersLogger.log({
@@ -276,6 +321,8 @@ export class OrderExecutor {
         slOrderType: appliedSlOrderType,
         slBackupPrice: appliedSlOrderType === "Limit" && backupPlaced ? slBackup : null,
         tp,
+        partialTp: partialTpPlaced ? partialTp : null,
+        partialTpQty: partialTpPlaced ? partialTpQty : null,
         status: "filled",
         bybitOrderId: orderId,
         error: notes.length > 0 ? notes.join("; ") : null,

@@ -16,6 +16,9 @@ export type EnvFormValues = {
   stopLossPercent: string;
   stopLossOrderType: string;
   takeProfitPercent: string;
+  partialTpEnabled: boolean;
+  partialTpPercent: string;
+  partialTpSizePercent: string;
   maxPositions: string;
   maxPositionsWindowSec: string;
   direction: string;
@@ -58,6 +61,9 @@ type TradingConfig = {
     stopLossPercent: number | null;
     stopLossOrderType: "market" | "limit";
     takeProfitPercent: number | null;
+    partialTpEnabled?: boolean;
+    partialTpPercent?: number;
+    partialTpSizePercent?: number;
     maxPositions: number;
     maxPositionsWindowSec: number;
     direction: "both" | "long" | "short";
@@ -227,6 +233,9 @@ export async function loadEnv(): Promise<LoadedEnv> {
       stopLossPercent: config.trading.stopLossPercent !== null ? String(config.trading.stopLossPercent) : "",
       stopLossOrderType: config.trading.stopLossOrderType ?? "market",
       takeProfitPercent: config.trading.takeProfitPercent !== null ? String(config.trading.takeProfitPercent) : "",
+      partialTpEnabled: config.trading.partialTpEnabled ?? false,
+      partialTpPercent: String(config.trading.partialTpPercent ?? 1),
+      partialTpSizePercent: String(config.trading.partialTpSizePercent ?? 50),
       maxPositions: String(config.trading.maxPositions),
       maxPositionsWindowSec: String(config.trading.maxPositionsWindowSec ?? 600),
       direction: config.trading.direction ?? "both",
@@ -281,6 +290,11 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
   const stopLossPercent = parseOptionalPositiveNumber(input.stopLossPercent, "Stop loss %");
   const stopLossOrderType = parseStopLossOrderType(input.stopLossOrderType);
   const takeProfitPercent = parseOptionalPositiveNumber(input.takeProfitPercent, "Take profit %");
+  const partialTpPercent = parsePositiveNumber(input.partialTpPercent, "Partial take profit %");
+  const partialTpSizePercent = parsePositiveNumber(input.partialTpSizePercent, "Partial take profit size %");
+  if (partialTpSizePercent >= 100) {
+    throw new Error(`Partial take profit size % (${partialTpSizePercent}) must be less than 100`);
+  }
   const maxPositions = parsePositiveInteger(input.maxPositions, "Max positions per window");
   const maxPositionsWindowSec = parsePositiveInteger(input.maxPositionsWindowSec, "Position limit window (sec)");
   const direction = parseDirection(input.direction);
@@ -308,6 +322,13 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
     );
   }
 
+  // Частичный TP дальше основного бессмысленен: основной (на остаток) исполнится первым.
+  if (input.partialTpEnabled && takeProfitPercent !== null && partialTpPercent >= takeProfitPercent) {
+    throw new Error(
+      `Partial take profit % (${partialTpPercent}) must be less than take profit % (${takeProfitPercent})`
+    );
+  }
+
   const currentConfig = await readConfig();
   const nextConfig: TradingConfig = {
     server: { port: serverPort, host: serverHost },
@@ -319,6 +340,9 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
       stopLossPercent,
       stopLossOrderType,
       takeProfitPercent,
+      partialTpEnabled: input.partialTpEnabled,
+      partialTpPercent,
+      partialTpSizePercent,
       maxPositions,
       maxPositionsWindowSec,
       direction,

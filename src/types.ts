@@ -15,6 +15,8 @@ export type SignalRejectReason =
   | "invalid_schema"
   | "below_threshold"
   | "max_pos_limit"
+  | "max_open_positions"
+  | "max_open_check_failed"
   | "trading_paused"
   | "direction_filtered";
 

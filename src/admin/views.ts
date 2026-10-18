@@ -370,7 +370,7 @@ const SETTINGS_CSS = `
 }
 `;
 
-type Rule = "pos" | "nonneg" | "int" | "optpos" | "port" | "req";
+type Rule = "pos" | "nonneg" | "int" | "optpos" | "optint" | "port" | "req";
 
 type InputOptions = {
   rule: Rule;
@@ -484,6 +484,7 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
           </div>
           ${errorSlot("maxPositions")}${errorSlot("maxPositionsWindowSec")}`
         )}
+        ${settingRow("maxOpen", "maxOpenD", textInput("maxOpenPositions", values.maxOpenPositions, { rule: "optint", mode: "numeric", placeholder: "phDisabled" }) + errorSlot("maxOpenPositions"))}
       </div>
     </section>
 
@@ -710,10 +711,11 @@ const SETTINGS_SCRIPT = `
     nonneg: (v) => v !== "" && Number.isFinite(Number(v)) && Number(v) >= 0,
     int: (v) => v !== "" && Number.isInteger(Number(v)) && Number(v) > 0,
     optpos: (v) => v === "" || (Number.isFinite(Number(v)) && Number(v) > 0),
+    optint: (v) => v === "" || (Number.isInteger(Number(v)) && Number(v) > 0),
     port: (v) => v !== "" && Number.isInteger(Number(v)) && Number(v) > 0 && Number(v) <= 65535,
     req: (v) => v !== "",
   };
-  const RULE_ERRORS = { pos: "errPos", nonneg: "errNonneg", int: "errInt", optpos: "errPos", port: "errPort", req: "errReq" };
+  const RULE_ERRORS = { pos: "errPos", nonneg: "errNonneg", int: "errInt", optpos: "errPos", optint: "errInt", port: "errPort", req: "errReq" };
 
   function validate(input) {
     const rule = input.dataset.rule;

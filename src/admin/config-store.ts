@@ -21,6 +21,7 @@ export type EnvFormValues = {
   partialTpSizePercent: string;
   maxPositions: string;
   maxPositionsWindowSec: string;
+  maxOpenPositions: string;
   direction: string;
   breakevenEnabled: boolean;
   breakevenTriggerPercent: string;
@@ -66,6 +67,7 @@ type TradingConfig = {
     partialTpSizePercent?: number;
     maxPositions: number;
     maxPositionsWindowSec: number;
+    maxOpenPositions?: number | null;
     direction: "both" | "long" | "short";
     breakevenEnabled: boolean;
     breakevenTriggerPercent: number;
@@ -238,6 +240,10 @@ export async function loadEnv(): Promise<LoadedEnv> {
       partialTpSizePercent: String(config.trading.partialTpSizePercent ?? 50),
       maxPositions: String(config.trading.maxPositions),
       maxPositionsWindowSec: String(config.trading.maxPositionsWindowSec ?? 600),
+      maxOpenPositions:
+        config.trading.maxOpenPositions !== undefined && config.trading.maxOpenPositions !== null
+          ? String(config.trading.maxOpenPositions)
+          : "",
       direction: config.trading.direction ?? "both",
       breakevenEnabled: config.trading.breakevenEnabled ?? false,
       breakevenTriggerPercent: String(config.trading.breakevenTriggerPercent ?? 1),
@@ -297,6 +303,9 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
   }
   const maxPositions = parsePositiveInteger(input.maxPositions, "Max positions per window");
   const maxPositionsWindowSec = parsePositiveInteger(input.maxPositionsWindowSec, "Position limit window (sec)");
+  const maxOpenPositions = input.maxOpenPositions.trim()
+    ? parsePositiveInteger(input.maxOpenPositions, "Max open positions")
+    : null;
   const direction = parseDirection(input.direction);
   const breakevenTriggerPercent = parsePositiveNumber(input.breakevenTriggerPercent, "Breakeven trigger %");
   const breakevenExtraProfitPercent = parseNonNegativeNumber(input.breakevenExtraProfitPercent, "Breakeven extra profit %");
@@ -345,6 +354,7 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
       partialTpSizePercent,
       maxPositions,
       maxPositionsWindowSec,
+      maxOpenPositions,
       direction,
       breakevenEnabled: input.breakevenEnabled,
       breakevenTriggerPercent,

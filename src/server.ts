@@ -18,6 +18,7 @@ import { MarketTpSlConversionMonitor } from "./marketTpSlConversionMonitor";
 import { SymbolQueue } from "./util/symbolQueue";
 import { DedupStore } from "./dedupStore";
 import { PositionRateLimiter } from "./positionRateLimiter";
+import { OpenPositionsLimiter } from "./openPositionsLimiter";
 import { startAdminServerIfEnabled } from "./admin/index";
 import { isTradingPaused } from "./tradingState";
 import path from "node:path";
@@ -54,6 +55,14 @@ async function main(): Promise<void> {
     marketTpSlConversionLogger,
     symbolQueue
   );
+  const openPositionsLimiter =
+    config.trading.maxOpenPositions !== null
+      ? new OpenPositionsLimiter(
+          bybitClient,
+          config.trading.maxOpenPositions,
+          config.trading.maxPositionsWindowSec * 1000
+        )
+      : null;
   const executor = new OrderExecutor(
     config,
     bybitClient,
@@ -72,6 +81,7 @@ async function main(): Promise<void> {
   positionSizeSyncMonitor.start();
   // Работает постоянно (если включён), независимо от входов бота — см. MarketTpSlConversionMonitor.
   marketTpSlConversionMonitor.start();
+  openPositionsLimiter?.start();
 
   const app = Fastify({ logger: true });
 
@@ -122,11 +132,23 @@ async function main(): Promise<void> {
       return reply.code(200).send({ decision: "rejected", reason: "max_pos_limit" });
     }
 
+    // Лимит одновременно открытых позиций (maxOpenPositions; null = выкл.)
+    // Проверка синхронная, по кэшу фонового опроса позиций — задержки на входе не добавляет.
+    if (openPositionsLimiter) {
+      const reserve = openPositionsLimiter.tryReserve(signal.symbol);
+      if (reserve !== "ok") {
+        const reason = reserve === "limit" ? "max_open_positions" : "max_open_check_failed";
+        signalsLogger.log(signal, "rejected", reason);
+        return reply.code(200).send({ decision: "rejected", reason });
+      }
+    }
+
     signalsLogger.log(signal, "accepted", null);
 
     // Идемпотентность: повторный сигнал (symbol + timestamp) не создаёт новый ордер
     const dedupKey = DedupStore.key(signal.symbol, signal.timestamp);
     if (dedupStore.has(dedupKey)) {
+      openPositionsLimiter?.release(signal.symbol);
       return reply.code(200).send({ decision: "accepted", duplicate: true });
     }
     dedupStore.add(dedupKey);
@@ -134,7 +156,7 @@ async function main(): Promise<void> {
     positionLimiter.recordOpen(Date.now());
 
     // Исполнение асинхронно, ошибки логируются внутри executor'а
-    void executor.execute(signal);
+    void executor.execute(signal).finally(() => openPositionsLimiter?.release(signal.symbol));
 
     return reply.code(200).send({ decision: "accepted", duplicate: false });
   });

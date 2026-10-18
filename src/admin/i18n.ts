@@ -58,6 +58,8 @@ const en = {
   limit: "Limit",
   rate: "Rate limit",
   rateD: "Max new positions within a rolling window (e.g. 300 sec = 5 min).",
+  maxOpen: "Max open positions",
+  maxOpenD: "Max positions open at the same time on the account (including entries still being filled). Open positions are re-read from Bybit once per rate-limit window. A new signal on a symbol that already has a position is not blocked.",
   per: "per",
 
   // Exit
@@ -197,6 +199,8 @@ const ru: Record<I18nKey, string> = {
   limit: "Лимитный",
   rate: "Лимит частоты",
   rateD: "Максимум новых позиций в скользящем окне (например, 300 сек = 5 мин).",
+  maxOpen: "Макс. открытых позиций",
+  maxOpenD: "Максимум одновременно открытых позиций на аккаунте (с учётом входов, которые ещё исполняются). Список позиций перечитывается с Bybit раз в окно лимита частоты. Сигнал по символу, где позиция уже есть, не блокируется.",
   per: "за",
 
   sl: "Стоп-лосс",

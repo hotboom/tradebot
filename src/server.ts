@@ -19,6 +19,7 @@ import { SymbolQueue } from "./util/symbolQueue";
 import { DedupStore } from "./dedupStore";
 import { PositionRateLimiter } from "./positionRateLimiter";
 import { OpenPositionsLimiter } from "./openPositionsLimiter";
+import { PriceChangeFilter } from "./priceChangeFilter";
 import { startAdminServerIfEnabled } from "./admin/index";
 import { isTradingPaused } from "./tradingState";
 import path from "node:path";
@@ -63,6 +64,10 @@ async function main(): Promise<void> {
           config.trading.maxPositionsWindowSec * 1000
         )
       : null;
+  const priceChangeFilter =
+    config.trading.max24hChangePercent !== null
+      ? new PriceChangeFilter(bybitClient, config.trading.max24hChangePercent)
+      : null;
   const executor = new OrderExecutor(
     config,
     bybitClient,
@@ -82,6 +87,7 @@ async function main(): Promise<void> {
   // Работает постоянно (если включён), независимо от входов бота — см. MarketTpSlConversionMonitor.
   marketTpSlConversionMonitor.start();
   openPositionsLimiter?.start();
+  priceChangeFilter?.start();
 
   const app = Fastify({ logger: true });
 
@@ -123,6 +129,16 @@ async function main(): Promise<void> {
     if (!filter.accepted) {
       signalsLogger.log(signal, "rejected", filter.reason);
       return reply.code(200).send({ decision: "rejected", reason: filter.reason });
+    }
+
+    // Фильтр по изменению цены за 24ч (max24hChangePercent; null = выкл.) — по фоновому кэшу тикеров.
+    if (priceChangeFilter) {
+      const check = priceChangeFilter.check(signal.symbol);
+      if (check !== "ok") {
+        const reason = check === "filtered" ? "change_24h_filtered" : "change_24h_check_failed";
+        signalsLogger.log(signal, "rejected", reason);
+        return reply.code(200).send({ decision: "rejected", reason });
+      }
     }
 
     // Защита от лавины сигналов при обвале рынка: не более maxPositions новых позиций

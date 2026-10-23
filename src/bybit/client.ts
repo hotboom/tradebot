@@ -252,6 +252,20 @@ export class BybitClient {
     return price;
   }
 
+  /** Изменение цены за 24ч (в %, +105 = рост на 105%) по всем linear-тикерам одним запросом. */
+  async getAll24hChangePercent(): Promise<Map<string, number>> {
+    const res = await this.rest.getTickers({ category: "linear" });
+    if (res.retCode !== 0) {
+      throw new Error(`getTickers (bulk) failed: ${res.retCode} ${res.retMsg}`);
+    }
+    const out = new Map<string, number>();
+    for (const t of res.result.list ?? []) {
+      const pct = Number(t.price24hPcnt) * 100;
+      if (Number.isFinite(pct)) out.set(t.symbol, pct);
+    }
+    return out;
+  }
+
   /** Средняя цена входа и полный текущий объём открытой позиции (после исполнения входа) —
    * нужны, чтобы считать/сайзить SL/TP на весь объём позиции, а не только на последний вход
    * (при повторных входах по символу Bybit сам блендит avgPrice по всем филам). Возвращает

@@ -22,6 +22,7 @@ export type EnvFormValues = {
   maxPositions: string;
   maxPositionsWindowSec: string;
   maxOpenPositions: string;
+  max24hChangePercent: string;
   direction: string;
   breakevenEnabled: boolean;
   breakevenTriggerPercent: string;
@@ -68,6 +69,7 @@ type TradingConfig = {
     maxPositions: number;
     maxPositionsWindowSec: number;
     maxOpenPositions?: number | null;
+    max24hChangePercent?: number | null;
     direction: "both" | "long" | "short";
     breakevenEnabled: boolean;
     breakevenTriggerPercent: number;
@@ -244,6 +246,10 @@ export async function loadEnv(): Promise<LoadedEnv> {
         config.trading.maxOpenPositions !== undefined && config.trading.maxOpenPositions !== null
           ? String(config.trading.maxOpenPositions)
           : "",
+      max24hChangePercent:
+        config.trading.max24hChangePercent !== undefined && config.trading.max24hChangePercent !== null
+          ? String(config.trading.max24hChangePercent)
+          : "",
       direction: config.trading.direction ?? "both",
       breakevenEnabled: config.trading.breakevenEnabled ?? false,
       breakevenTriggerPercent: String(config.trading.breakevenTriggerPercent ?? 1),
@@ -306,6 +312,7 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
   const maxOpenPositions = input.maxOpenPositions.trim()
     ? parsePositiveInteger(input.maxOpenPositions, "Max open positions")
     : null;
+  const max24hChangePercent = parseOptionalPositiveNumber(input.max24hChangePercent, "Max 24h price change %");
   const direction = parseDirection(input.direction);
   const breakevenTriggerPercent = parsePositiveNumber(input.breakevenTriggerPercent, "Breakeven trigger %");
   const breakevenExtraProfitPercent = parseNonNegativeNumber(input.breakevenExtraProfitPercent, "Breakeven extra profit %");
@@ -355,6 +362,7 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
       maxPositions,
       maxPositionsWindowSec,
       maxOpenPositions,
+      max24hChangePercent,
       direction,
       breakevenEnabled: input.breakevenEnabled,
       breakevenTriggerPercent,

@@ -485,6 +485,7 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
           ${errorSlot("maxPositions")}${errorSlot("maxPositionsWindowSec")}`
         )}
         ${settingRow("maxOpen", "maxOpenD", textInput("maxOpenPositions", values.maxOpenPositions, { rule: "optint", mode: "numeric", placeholder: "phDisabled" }) + errorSlot("maxOpenPositions"))}
+        ${settingRow("max24h", "max24hD", textInput("max24hChangePercent", values.max24hChangePercent, { rule: "optpos", unit: PCT, placeholder: "phDisabled" }) + errorSlot("max24hChangePercent"))}
       </div>
     </section>
 

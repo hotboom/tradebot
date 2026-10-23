@@ -169,6 +169,7 @@ function envFromForm(form: URLSearchParams): EnvFormValues {
     maxPositions: form.get("maxPositions") ?? "",
     maxPositionsWindowSec: form.get("maxPositionsWindowSec") ?? "",
     maxOpenPositions: form.get("maxOpenPositions") ?? "",
+    max24hChangePercent: form.get("max24hChangePercent") ?? "",
     direction: form.get("direction") ?? "both",
     breakevenEnabled: form.get("breakevenEnabled") === "true",
     breakevenTriggerPercent: form.get("breakevenTriggerPercent") ?? "",

@@ -60,8 +60,6 @@ const en = {
   rateD: "Max new positions within a rolling window (e.g. 300 sec = 5 min).",
   maxOpen: "Max open positions",
   maxOpenD: "Max positions open at the same time on the account (including entries still being filled). Open positions are re-read from Bybit once per rate-limit window. A new signal on a symbol that already has a position is not blocked.",
-  max24h: "Max 24h price change",
-  max24hD: "Ignore the signal if the coin's price moved more than this % over 24h, up or down (Bybit 24h change, refreshed every minute). Note: a drop can be at most −100%.",
   per: "per",
 
   // Exit
@@ -203,8 +201,6 @@ const ru: Record<I18nKey, string> = {
   rateD: "Максимум новых позиций в скользящем окне (например, 300 сек = 5 мин).",
   maxOpen: "Макс. открытых позиций",
   maxOpenD: "Максимум одновременно открытых позиций на аккаунте (с учётом входов, которые ещё исполняются). Список позиций перечитывается с Bybit раз в окно лимита частоты. Сигнал по символу, где позиция уже есть, не блокируется.",
-  max24h: "Макс. изменение цены за 24ч",
-  max24hD: "Игнорировать сигнал, если цена монеты за 24 часа выросла или упала больше чем на этот % (изменение за 24ч с Bybit, обновляется раз в минуту). Учтите: падение не может быть больше −100%.",
   per: "за",
 
   sl: "Стоп-лосс",

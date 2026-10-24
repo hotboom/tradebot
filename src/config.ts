@@ -26,8 +26,6 @@ const configSchema = z.object({
     maxPositionsWindowSec: z.number().int().positive().nullish().transform((v) => v ?? 600),
     // Максимум одновременно открытых позиций на аккаунте (null = без ограничения).
     maxOpenPositions: z.number().int().positive().nullish().transform((v) => v ?? null),
-    // Игнорировать сигнал, если |изменение цены монеты за 24ч| больше этого % (null = выкл.).
-    max24hChangePercent: z.number().positive().nullish().transform((v) => v ?? null),
     direction: z.enum(["both", "long", "short"]).default("both"),
     breakevenEnabled: z.boolean().nullish().transform((v) => v ?? false),
     breakevenTriggerPercent: z.number().positive().nullish().transform((v) => v ?? 1),

@@ -2,7 +2,7 @@ import "dotenv/config";
 import Fastify, { type FastifyError } from "fastify";
 import { loadConfig } from "./config";
 import { cascadeSignalSchema } from "./schema/cascadeSignal";
-import { checkThreshold, checkDirection } from "./decision/filters";
+import { checkDirection } from "./decision/filters";
 import { BybitClient } from "./bybit/client";
 import { SignalsLogger } from "./logging/signalsLogger";
 import { OrdersLogger } from "./logging/ordersLogger";
@@ -117,12 +117,6 @@ async function main(): Promise<void> {
     if (!directionFilter.accepted) {
       signalsLogger.log(signal, "rejected", directionFilter.reason);
       return reply.code(200).send({ decision: "rejected", reason: directionFilter.reason });
-    }
-
-    const filter = checkThreshold(signal, config.trading.minLiquidationUsdt);
-    if (!filter.accepted) {
-      signalsLogger.log(signal, "rejected", filter.reason);
-      return reply.code(200).send({ decision: "rejected", reason: filter.reason });
     }
 
     // Защита от лавины сигналов при обвале рынка: не более maxPositions новых позиций

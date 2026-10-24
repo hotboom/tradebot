@@ -10,7 +10,6 @@ export type EnvFormValues = {
   bybitTestnet: boolean;
   serverHost: string;
   serverPort: string;
-  minLiquidationUsdt: string;
   positionSizeUsdt: string;
   entryOrderType: string;
   stopLossPercent: string;
@@ -56,7 +55,6 @@ type TradingConfig = {
     testnet: boolean;
   };
   trading: {
-    minLiquidationUsdt: number;
     positionSizeUsdt: number;
     entryOrderType: "market" | "limit";
     stopLossPercent: number | null;
@@ -229,7 +227,6 @@ export async function loadEnv(): Promise<LoadedEnv> {
       bybitTestnet: config.bybit.testnet,
       serverHost: config.server.host,
       serverPort: String(config.server.port),
-      minLiquidationUsdt: String(config.trading.minLiquidationUsdt),
       positionSizeUsdt: String(config.trading.positionSizeUsdt),
       entryOrderType: config.trading.entryOrderType ?? "market",
       stopLossPercent: config.trading.stopLossPercent !== null ? String(config.trading.stopLossPercent) : "",
@@ -290,7 +287,6 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
     throw new Error("Server host must not be empty");
   }
 
-  const minLiquidationUsdt = parsePositiveNumber(input.minLiquidationUsdt, "Min liquidation USDT");
   const positionSizeUsdt = parsePositiveNumber(input.positionSizeUsdt, "Position size USDT");
   const entryOrderType = parseEntryOrderType(input.entryOrderType);
   const stopLossPercent = parseOptionalPositiveNumber(input.stopLossPercent, "Stop loss %");
@@ -343,7 +339,6 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
     server: { port: serverPort, host: serverHost },
     bybit: { testnet: input.bybitTestnet },
     trading: {
-      minLiquidationUsdt,
       positionSizeUsdt,
       entryOrderType,
       stopLossPercent,

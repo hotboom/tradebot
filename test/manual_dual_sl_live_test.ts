@@ -20,7 +20,6 @@ async function main(): Promise<void> {
     server: { port: 0, host: "127.0.0.1" },
     bybit: { testnet: false },
     trading: {
-      minLiquidationUsdt: 80000,
       positionSizeUsdt: 10, // маленький номинал — код сам поднимет qty до биржевого минимума
       stopLossPercent: 2,
       stopLossOrderType: "limit",

@@ -93,8 +93,9 @@ pm2 restart executor-service
 ```
 
 - Некорректная схема — `400`, запись в `signals.log` (`rejected` / `invalid_schema`).
-- Объём ниже `trading.minLiquidationUsdt` — `200`, запись `rejected` / `below_threshold`, ордер не создаётся.
-- Валидный сигнал выше порога — `200`, вход Buy (сигнал `LONG`) или Sell (`SHORT`) на объём
+- Минимальный объём каскада бот не проверяет — порог задаётся в мониторе (`CASCADE_MIN_VOLUME_USDT`
+  в lqmonitor_fast).
+- Валидный сигнал — `200`, вход Buy (сигнал `LONG`) или Sell (`SHORT`) на объём
   `trading.positionSizeUsdt`; результат — в `orders.log`.
 - Повторный сигнал (тот же `symbol` + `timestamp`) не создаёт дубликат ордера (идемпотентность
   по `logs/processed_signals.log`).

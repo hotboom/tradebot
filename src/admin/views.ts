@@ -473,7 +473,6 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
         ${settingRow("posSize", "posSizeD", textInput("positionSizeUsdt", values.positionSizeUsdt, { rule: "pos", unit: USDT }) + errorSlot("positionSizeUsdt"))}
         ${settingRow("direction", "directionD", segmented("direction", values.direction, [["long", "long"], ["short", "short"], ["both", "both"]]))}
         ${settingRow("orderType", "orderTypeD", segmented("entryOrderType", values.entryOrderType, [["market", "market"], ["limit", "limit"]]))}
-        ${settingRow("minLiq", "minLiqD", textInput("minLiquidationUsdt", values.minLiquidationUsdt, { rule: "pos", unit: USDT }) + errorSlot("minLiquidationUsdt"))}
         ${settingRow(
           "rate",
           "rateD",

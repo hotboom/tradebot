@@ -43,8 +43,6 @@ const en = {
   every: "every",
 
   // Entry
-  minLiq: "Min liquidation size",
-  minLiqD: "Incoming signals below this liquidation size are ignored.",
   posSize: "Position size",
   posSizeD: "Notional size of each opened position, in USDT.",
   direction: "Direction",
@@ -184,8 +182,6 @@ const ru: Record<I18nKey, string> = {
   sec: "сек",
   every: "каждые",
 
-  minLiq: "Мин. размер ликвидации",
-  minLiqD: "Входящие сигналы с размером ликвидации меньше этого значения игнорируются.",
   posSize: "Размер позиции",
   posSizeD: "Номинальный размер каждой открываемой позиции в USDT.",
   direction: "Направление",

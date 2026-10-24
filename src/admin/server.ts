@@ -157,7 +157,6 @@ function envFromForm(form: URLSearchParams): EnvFormValues {
     bybitTestnet: form.get("bybitTestnet") === "true",
     serverHost: form.get("serverHost") ?? "",
     serverPort: form.get("serverPort") ?? "",
-    minLiquidationUsdt: form.get("minLiquidationUsdt") ?? "",
     positionSizeUsdt: form.get("positionSizeUsdt") ?? "",
     entryOrderType: form.get("entryOrderType") ?? "market",
     stopLossPercent: form.get("stopLossPercent") ?? "",

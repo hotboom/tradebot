@@ -5,14 +5,6 @@ export interface FilterResult {
   reason: SignalRejectReason | null;
 }
 
-/** Проверка порога объёма ликвидаций. */
-export function checkThreshold(signal: CascadeSignal, minLiquidationUsdt: number): FilterResult {
-  if (signal.totalVolumeUsdt < minLiquidationUsdt) {
-    return { accepted: false, reason: "below_threshold" };
-  }
-  return { accepted: true, reason: null };
-}
-
 /** Фильтр по разрешённому направлению сделок (both/long/short из настроек). */
 export function checkDirection(signal: CascadeSignal, direction: DirectionMode): FilterResult {
   if (direction === "both") {

@@ -1,10 +1,11 @@
 import type { AppConfig } from "./config";
 import type { BybitClient } from "./bybit/client";
 import type { OrdersLogger } from "./logging/ordersLogger";
-import type { CascadeSignal, OrderSide } from "./types";
+import type { CascadeSignal, OrderSide, OrderLogEntry } from "./types";
 import { resolveOrderSide } from "./decision/filters";
 import { calcExitPrices, SL_BACKUP_BUFFER_MULTIPLIER } from "./decision/exits";
 import { replacePositionStop } from "./decision/riskOrders";
+import { OffsetLimitEntries, type OffsetFill } from "./bybit/offsetLimitEntry";
 import { chaseLimitEntry } from "./bybit/limitChaseEntry";
 import { roundDownToStep, roundToTick, placeablePrice } from "./util/rounding";
 import type { BreakevenMonitor } from "./breakevenMonitor";
@@ -13,6 +14,7 @@ import type { PositionSizeSyncMonitor } from "./positionSizeSyncMonitor";
 import type { SymbolQueue } from "./util/symbolQueue";
 
 export class OrderExecutor {
+  private readonly offsetEntries: OffsetLimitEntries;
   constructor(
     private readonly config: AppConfig,
     private readonly client: BybitClient,
@@ -26,19 +28,46 @@ export class OrderExecutor {
     // условных ордеров могут гоняться за неактуальным состоянием позиции. Разные символы друг
     // друга не блокируют.
     private readonly symbolQueue: SymbolQueue
-  ) {}
+  ) {
+    this.offsetEntries = new OffsetLimitEntries(config, client, symbolQueue, ordersLogger,
+      fill => symbolQueue.run(fill.entry.signal.symbol, () => this.run(fill.entry.signal, fill)));
+  }
+
+  hasPendingEntry(symbol: string): boolean { return this.offsetEntries.hasPending(symbol); }
+  pendingSymbols(): string[] { return this.offsetEntries.pendingSymbols(); }
+  resumePendingEntries(release: (symbol: string) => void): void { this.offsetEntries.resume(release); }
 
   /** Исполнение принятого сигнала. Ошибки логируются, наружу не бросаются. */
-  execute(signal: CascadeSignal): Promise<void> {
+  execute(signal: CascadeSignal, onSkipped?: () => void): Promise<void> {
+    if (this.config.trading.entryOrderType === "offset_limit") return this.offsetEntries.execute(signal, onSkipped);
     return this.symbolQueue.run(signal.symbol, () => this.run(signal)).catch(() => {});
   }
 
-  private async run(signal: CascadeSignal): Promise<void> {
+  private async run(signal: CascadeSignal, offsetFill?: OffsetFill): Promise<void> {
     const side: OrderSide = resolveOrderSide(signal.direction);
-    // Цену входа не запрашиваем отдельно (getLastPrice убран из критического пути):
-    // qty и SL/TP считаем от lastBankruptcyPrice из сигнала (MVP, проскальзывание допустимо).
-    const entryPriceRef = signal.lastBankruptcyPrice;
-    let qty: number | null = null;
+    // Offset entry was already filled by its monitor; market/chase keep the existing sizing reference.
+    let entryPriceRef = offsetFill?.avgPrice ?? signal.lastBankruptcyPrice;
+    let filled = Boolean(offsetFill);
+    let orderFillPrice: number | null = offsetFill?.avgPrice ?? null;
+    let entryFilledAt: number | null = offsetFill?.filledAt ?? null;
+    let riskPriceError: string | null = null;
+    let positionAvgPrice: number | null = null;
+    const log = (entry: Omit<OrderLogEntry, "ts">): void => {
+      this.ordersLogger.log({ ...entry,
+        signalTs: signal.timestamp,
+        entryOrderType: offsetFill ? "offset_limit" : this.config.trading.entryOrderType,
+        entryOffsetPercent: offsetFill?.entry.offsetPercent ?? null,
+        minEntryDistancePercent: offsetFill?.entry.minEntryDistancePercent,
+        previousEntryPrice: offsetFill?.entry.previousEntryPrice,
+        actualEntryDistancePercent: offsetFill?.entry.actualEntryDistancePercent,
+        limitPrice: offsetFill?.entry.price ?? null,
+        orderFillPrice,
+        positionAvgPrice,
+        entryFilledAt,
+        entryOutcome: offsetFill?.outcome,
+      });
+    };
+    let qty: number | null = offsetFill?.qty ?? null;
     // Полный текущий объём позиции (может быть больше qty при повторном входе по символу) —
     // от него сайзим SL/TP, чтобы защищать всю позицию, а не только последний вход.
     let positionQty: number | null = null;
@@ -50,7 +79,7 @@ export class OrderExecutor {
     let partialTpQty: number | null = null;
     let tpRemainderQty: number | null = null;
     let partialTpSkipReason: string | null = null;
-    let orderId: string | null = null;
+    let orderId: string | null = offsetFill?.entry.orderId ?? null;
     let refMarketPrice: number | null = null;
 
     // Шаг 1: вход без SL/TP (маркет — быстрый путь по умолчанию, либо чейз лимитником — см. entryOrderType).
@@ -65,12 +94,19 @@ export class OrderExecutor {
       positionQty = qty;
 
       let fillPrice = entryPriceRef;
-      if (this.config.trading.entryOrderType === "limit") {
+      if (offsetFill) {
+        qty = offsetFill.qty;
+        positionQty = qty;
+        orderId = offsetFill.entry.orderId;
+        fillPrice = offsetFill.avgPrice;
+        refMarketPrice = offsetFill.entry.refPrice;
+      } else if (this.config.trading.entryOrderType === "limit") {
         // Чейзит лимитник на best bid/ask до полного исполнения (без таймаута — см. план).
         const chase = await chaseLimitEntry(this.client, { symbol: signal.symbol, side, qty });
         orderId = chase.lastOrderId;
         fillPrice = chase.avgPrice;
         refMarketPrice = chase.refPrice;
+        orderFillPrice = chase.avgPrice;
       } else {
         orderId = await this.client.submitMarketOrder({
           symbol: signal.symbol,
@@ -79,19 +115,38 @@ export class OrderExecutor {
         });
       }
 
+      filled = true;
+      entryFilledAt ??= Date.now();
+      entryPriceRef = fillPrice;
+
       // Реальные среднюю цену и полный объём входа берём из позиции (а не из fillPrice/qty
       // этого конкретного входа) — при повторном входе по символу Bybit уже отразит в позиции
       // блендед avgPrice и суммарный size по всем входам. Если позиция ещё не отразилась —
       // откатываемся на цену/объём только этого входа (fillPrice/qty уже посчитаны выше).
       try {
         const position = await this.client.getOpenPosition(signal.symbol);
+        if (position?.side && position.side !== side) {
+          log({ symbol: signal.symbol, side, qty, entryPriceRef: fillPrice, refMarketPrice,
+            sl: null, slOrderType: null, slBackupPrice: null, tp: null, status: "filled",
+            bybitOrderId: orderId, error: "Opposite position remains after entry; risk orders left unchanged" });
+          return;
+        }
         if (position) {
+          positionAvgPrice = position.avgPrice;
           fillPrice = position.avgPrice;
           positionQty = position.size;
+        } else if (offsetFill) {
+          // A partial fill may have been closed by its exchange-side stop while the remainder waited.
+          log({ symbol: signal.symbol, side, qty, entryPriceRef: fillPrice, refMarketPrice,
+            sl: null, slOrderType: null, slBackupPrice: null, tp: null, status: "filled",
+            bybitOrderId: orderId, error: "Entry executed; no open position remains for risk orders" });
+          return;
         }
       } catch {
         // позиция недоступна — считаем SL/TP от цены/объёма только этого входа
       }
+
+      entryPriceRef = fillPrice;
 
       // Позиция на бирже уже открыта (независимо от того, встанет ли ниже SL/TP) — запускаем
       // (если ещё не запущены) периодический перенос стопа в безубыток и trailing-stop. Оба
@@ -132,7 +187,7 @@ export class OrderExecutor {
       // exits вернул цену, а после округления она невалидна (0/NaN — например из-за кривого
       // tickSize у низкоценовой монеты): на биржу нулём НЕ шлём (Bybit воспримет 0 как снятие
       // стопа), фиксируем как ошибку в orders.log.
-      const riskPriceError =
+      riskPriceError =
         (exits.stopLoss !== null && sl === null) || (exits.takeProfit !== null && tp === null)
           ? `${[exits.stopLoss !== null && sl === null ? "SL" : null, exits.takeProfit !== null && tp === null ? "TP" : null]
               .filter((x): x is string => x !== null)
@@ -150,25 +205,11 @@ export class OrderExecutor {
         slBackup = backupExits.stopLoss !== null ? roundToTick(backupExits.stopLoss, instrument.tickSize) : null;
       }
 
-      this.ordersLogger.log({
-        symbol: signal.symbol,
-        side,
-        qty,
-        entryPriceRef: fillPrice,
-        refMarketPrice,
-        sl,
-        slOrderType: null,
-        slBackupPrice: null,
-        tp,
-        status: "filled",
-        bybitOrderId: orderId,
-        error: riskPriceError,
-      });
       if (riskPriceError) {
         console.error(`[executor] ${signal.symbol} ${riskPriceError}`);
       }
     } catch (err) {
-      this.ordersLogger.log({
+      log({
         symbol: signal.symbol,
         side,
         qty,
@@ -178,8 +219,8 @@ export class OrderExecutor {
         slOrderType: null,
         slBackupPrice: null,
         tp,
-        status: "failed",
-        bybitOrderId: null,
+        status: filled ? "filled" : "failed",
+        bybitOrderId: orderId,
         error: err instanceof Error ? err.message : String(err),
       });
       return;
@@ -247,7 +288,7 @@ export class OrderExecutor {
           backupOrderError = result.backupError;
           if (result.cleanupError) noteCleanupError(result.cleanupError);
         } catch (err) {
-          this.ordersLogger.log({
+          log({
             symbol: signal.symbol,
             side,
             qty,
@@ -257,7 +298,7 @@ export class OrderExecutor {
             slOrderType: null,
             slBackupPrice: null,
             tp,
-            status: "failed",
+            status: "filled",
             bybitOrderId: orderId,
             error: `SL not set: ${err instanceof Error ? err.message : String(err)}`,
           });
@@ -301,6 +342,7 @@ export class OrderExecutor {
       }
 
       const notes = [
+        riskPriceError,
         preferLimitSl && appliedSlOrderType === "Market" ? "limit SL rejected, fell back to market SL" : null,
         cleanupError ? `stale order cleanup failed: ${cleanupError}` : null,
         appliedSlOrderType === "Limit" && slBackup !== null && !backupPlaced
@@ -311,7 +353,7 @@ export class OrderExecutor {
         partialTp !== null && !partialTpPlaced ? `partial TP limit order not set: ${partialTpOrderError}` : null,
       ].filter((note): note is string => note !== null);
 
-      this.ordersLogger.log({
+      log({
         symbol: signal.symbol,
         side,
         qty,
@@ -327,6 +369,10 @@ export class OrderExecutor {
         bybitOrderId: orderId,
         error: notes.length > 0 ? notes.join("; ") : null,
       });
+    } else {
+      log({ symbol: signal.symbol, side, qty, entryPriceRef, refMarketPrice,
+        sl, slOrderType: null, slBackupPrice: null, tp, status: "filled",
+        bybitOrderId: orderId, error: riskPriceError });
     }
   }
 }

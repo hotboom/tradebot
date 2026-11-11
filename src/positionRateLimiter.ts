@@ -22,8 +22,15 @@ export class PositionRateLimiter {
     return this.timestamps.length < this.limit;
   }
 
-  recordOpen(now: number): void {
+  recordOpen(now: number): () => void {
     this.prune(now);
     this.timestamps.push(now);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const index = this.timestamps.indexOf(now);
+      if (index !== -1) this.timestamps.splice(index, 1);
+    };
   }
 }

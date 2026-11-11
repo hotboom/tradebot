@@ -82,6 +82,8 @@ async function main(): Promise<void> {
   // Работает постоянно (если включён), независимо от входов бота — см. MarketTpSlConversionMonitor.
   marketTpSlConversionMonitor.start();
   openPositionsLimiter?.start();
+  for (const symbol of executor.pendingSymbols()) openPositionsLimiter?.restoreReservation(symbol);
+  executor.resumePendingEntries(symbol => openPositionsLimiter?.release(symbol));
 
   const app = Fastify({ logger: true });
 
@@ -119,6 +121,11 @@ async function main(): Promise<void> {
       return reply.code(200).send({ decision: "rejected", reason: directionFilter.reason });
     }
 
+    if (executor.hasPendingEntry(signal.symbol)) {
+      signalsLogger.log(signal, "rejected", "entry_pending");
+      return reply.code(200).send({ decision: "rejected", reason: "entry_pending" });
+    }
+
     // Защита от лавины сигналов при обвале рынка: не более maxPositions новых позиций
     // в скользящем окне длиной maxPositionsWindowSec (обе величины — из config/админки)
     if (!positionLimiter.canOpen(Date.now())) {
@@ -147,10 +154,10 @@ async function main(): Promise<void> {
     }
     dedupStore.add(dedupKey);
 
-    positionLimiter.recordOpen(Date.now());
+    const releaseSkippedRateReservation = positionLimiter.recordOpen(Date.now());
 
     // Исполнение асинхронно, ошибки логируются внутри executor'а
-    void executor.execute(signal).finally(() => openPositionsLimiter?.release(signal.symbol));
+    void executor.execute(signal, releaseSkippedRateReservation).finally(() => openPositionsLimiter?.release(signal.symbol));
 
     return reply.code(200).send({ decision: "accepted", duplicate: false });
   });

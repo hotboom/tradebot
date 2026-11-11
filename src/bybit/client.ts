@@ -42,6 +42,8 @@ export interface LimitOrderParams {
   side: OrderSide;
   qty: number;
   price: number;
+  orderLinkId?: string;
+  stopLoss?: number | null;
 }
 
 export interface OpenLimitOrder {
@@ -64,6 +66,7 @@ export interface AmendOrderQtyParams {
 }
 
 export interface OrderState {
+  orderId?: string;
   orderStatus: string;
   cumExecQty: number;
   avgPrice: number;
@@ -257,17 +260,22 @@ export class BybitClient {
    * (при повторных входах по символу Bybit сам блендит avgPrice по всем филам). Возвращает
    * null, если позиции нет / данные невалидны — вызывающий код в этом случае откатывается на
    * цену/объём собственно этого входа. */
-  async getOpenPosition(symbol: string): Promise<{ avgPrice: number; size: number } | null> {
+  async getOpenPosition(symbol: string): Promise<{ avgPrice: number; size: number; side?: OrderSide } | null> {
     const res = await this.rest.getPositionInfo({ category: "linear", symbol });
     if (res.retCode !== 0) {
       throw new Error(`getPositionInfo failed: ${res.retCode} ${res.retMsg}`);
     }
-    const avgPrice = Number(res.result.list?.[0]?.avgPrice);
-    const size = Number(res.result.list?.[0]?.size);
-    if (!Number.isFinite(avgPrice) || avgPrice <= 0 || !Number.isFinite(size) || size <= 0) {
-      return null;
+    const row = res.result.list?.[0];
+    if (!row) return null;
+    const size = Number(row.size);
+    if (row.size !== "" && size === 0) return null;
+    const avgPrice = Number(row.avgPrice);
+    const side = row.side;
+    if (!Number.isFinite(size) || size <= 0 || !Number.isFinite(avgPrice) || avgPrice <= 0
+      || (side !== "Buy" && side !== "Sell")) {
+      throw new Error(`Invalid open position snapshot for ${symbol}`);
     }
-    return { avgPrice, size };
+    return { avgPrice, size, side };
   }
 
   /** Сводка по всем открытым позициям аккаунта (category linear, settleCoin USDT) — для
@@ -424,9 +432,16 @@ export class BybitClient {
       qty: String(params.qty),
       price: String(params.price),
       timeInForce: "PostOnly",
+      ...(params.orderLinkId ? { orderLinkId: params.orderLinkId } : {}),
+      ...(params.stopLoss != null ? {
+        stopLoss: String(params.stopLoss),
+        slTriggerBy: "LastPrice" as const,
+        tpslMode: "Partial" as const,
+        slOrderType: "Market" as const,
+      } : {}),
     });
     if (res.retCode !== 0) {
-      throw new Error(`submitOrder (limit) failed: ${res.retCode} ${res.retMsg}`);
+      throw Object.assign(new Error(`submitOrder (limit) failed: ${res.retCode} ${res.retMsg}`), { definitiveRejection: ![10000, 10014, 10016, 10019].includes(res.retCode) });
     }
     return res.result.orderId;
   }
@@ -581,15 +596,15 @@ export class BybitClient {
   /** Текущее состояние ордера. getActiveOrders покрывает резидентные/частично исполненные ордера;
    * если ордер уже пропал из активных (обычно вскоре после полного исполнения или отмены) —
    * финальное состояние (cumExecQty/avgPrice/orderStatus) читаем из истории ордеров. */
-  async getOrderState(symbol: string, orderId: string): Promise<OrderState | null> {
-    const active = await this.rest.getActiveOrders({ category: "linear", symbol, orderId });
+  async getOrderState(symbol: string, orderId?: string, orderLinkId?: string): Promise<OrderState | null> {
+    const active = await this.rest.getActiveOrders({ category: "linear", symbol, ...(orderId ? { orderId } : { orderLinkId }) });
     if (active.retCode !== 0) {
       throw new Error(`getActiveOrders failed: ${active.retCode} ${active.retMsg}`);
     }
     let order = active.result.list?.[0];
 
     if (!order) {
-      const hist = await this.rest.getHistoricOrders({ category: "linear", symbol, orderId });
+      const hist = await this.rest.getHistoricOrders({ category: "linear", symbol, ...(orderId ? { orderId } : { orderLinkId }) });
       if (hist.retCode !== 0) {
         throw new Error(`getHistoricOrders failed: ${hist.retCode} ${hist.retMsg}`);
       }
@@ -598,6 +613,7 @@ export class BybitClient {
     if (!order) return null;
 
     return {
+      orderId: order.orderId,
       orderStatus: order.orderStatus,
       cumExecQty: Number(order.cumExecQty),
       avgPrice: Number(order.avgPrice) || 0,

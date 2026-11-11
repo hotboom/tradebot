@@ -12,7 +12,9 @@ const configSchema = z.object({
   }),
   trading: z.object({
     positionSizeUsdt: z.number().positive(),
-    entryOrderType: z.enum(["market", "limit"]).nullish().transform((v) => v ?? "market"),
+    entryOrderType: z.enum(["market", "limit", "offset_limit"]).nullish().transform((v) => v ?? "market"),
+    entryOffsetPercent: z.number().positive().lt(100).nullish().transform((v) => v ?? 0.5),
+    minEntryDistancePercent: z.number().nonnegative().lt(100).nullish().transform((v) => v ?? 0),
     stopLossPercent: z.number().positive().nullish().transform((v) => v ?? null),
     stopLossOrderType: z.enum(["market", "limit"]).nullish().transform((v) => v ?? "market"),
     takeProfitPercent: z.number().positive().nullish().transform((v) => v ?? null),

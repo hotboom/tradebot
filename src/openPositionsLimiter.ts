@@ -69,6 +69,11 @@ export class OpenPositionsLimiter {
     return "ok";
   }
 
+  /** Restore already-existing exchange orders before accepting any new signals. */
+  restoreReservation(symbol: string): void {
+    this.inFlight.set(symbol, (this.inFlight.get(symbol) ?? 0) + 1);
+  }
+
   release(symbol: string): void {
     const n = this.inFlight.get(symbol) ?? 0;
     if (n <= 1) this.inFlight.delete(symbol);

@@ -247,3 +247,25 @@ JSON Lines, append-only:
 ## Тестирование
 
 Перед боевым режимом проверять на `"testnet": true` (ключи API — от testnet.bybit.com).
+
+
+## Fixed offset entry (offset_limit)
+
+`trading.entryOrderType: "offset_limit"` adds a third entry mode. The executor fetches linear-futures Last once, then places a fixed PostOnly Buy below Last / Sell above Last by `entryOffsetPercent` (default 0.5). Buy prices round down and Sell prices up to tickSize. Quantity is calculated from the limit price. lqmonitor_fast is unchanged. No repricing, timeout, market fallback, or automatic re-submission after manual cancellation/PostOnly rejection.
+
+One pending entry per symbol; further signals for that symbol receive `entry_pending`. Waiting releases the symbol queue so existing position monitors continue. Pending entries reserve maxOpenPositions slots, including after restart. Opposite signals place the normal configured order size: execution reduces, closes, or reverses the existing position. The minimum-distance filter applies only to same-side add-ons. Opposite orders do not attach an entry-side SL to the existing position; after terminal execution, the executor sets risk orders for any reversed position and leaves protection unchanged if the original side remains.
+
+When SL is enabled for a fresh or same-side entry, the entry includes a Partial Market SL at the exchange to protect partial executions while the remainder waits. Normal configured SL/backup/TP/partial-TP setup runs after full fill or cancellation with a partial fill, using the current position average and size. Until then, partial fills have the attached SL; TP creation waits for terminal entry status. Existing risk monitors continue to operate. Pausing blocks new signals; already submitted exchange orders remain active. Cancel them manually on Bybit when required.
+
+Pending orders are saved in `logs/offset-entries.json` before submission and recovered by unique orderLinkId after restart. An ambiguous network response never triggers a blind resubmit: the monitor retains the reservation and reconciles the original order. If the order was never submitted (e.g. a crash between persisting intent and submitting), it remains pending for manual reconciliation; a warning with orderLinkId is printed.
+
+Orders journal: `submitted` describes placement; exactly one final `filled` record describes a completed/partially cancelled entry and its risk setup. A failed SL setup keeps `status: "filled"` with an error because the entry already happened. `cancelled` means no execution. `signalTs`, `entryOrderType`, `limitPrice`, `entryOffsetPercent`, `orderFillPrice`, `positionAvgPrice`, `entryFilledAt`, and `entryOutcome` support observation. `entryPriceRef` uses the position average when available, never a second bankruptcy-price record. Market orderFillPrice stays null when no per-order fill was queried. Chase averaging uses changes in cumulative execution value. Historical logs are unchanged.
+
+Validation: `npm run build`; `node --import tsx --test test/offset-entry.test.ts`. Tests mock the exchange and submit no live orders.
+
+
+### Minimum distance between offset entries
+
+`trading.minEntryDistancePercent` (0 disables) compares the rounded candidate limit price with the last executed order's own average fill price, not the blended position average. For an add-on to an existing long the candidate must be at least this percent lower; for a short, higher. Too-close signals are admitted by the HTTP endpoint but produce an orders.log `skipped` / `entryOutcome: "min_entry_distance"` event and no exchange order. Threshold, reference and actual distance are logged. Existing waiting orders are not moved or cancelled by this filter.
+
+Every candidate uses the exchange position snapshot already fetched alongside Last. If the position is absent (including a manual full close), the old entry reference is discarded and the next initial entry is unrestricted. A position-query failure blocks submission rather than treating the position as absent. On restart the last own order fill for each side is recovered from orders.log; if an open position has no known per-order fill reference the add-on is skipped with `entry_reference_missing`. Keep orders.log when restoring an open position. Partial closing does not reset the reference; fully executed or partially executed-and-cancelled entries advance it. The existing parallel position query is narrowed to the candidate symbol instead of the whole account. No extra REST request is introduced. A spacing skip releases its provisional rate-limit slot so it does not block a later correctly spaced signal.

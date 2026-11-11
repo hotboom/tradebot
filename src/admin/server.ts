@@ -159,6 +159,8 @@ function envFromForm(form: URLSearchParams): EnvFormValues {
     serverPort: form.get("serverPort") ?? "",
     positionSizeUsdt: form.get("positionSizeUsdt") ?? "",
     entryOrderType: form.get("entryOrderType") ?? "market",
+    entryOffsetPercent: form.get("entryOffsetPercent") ?? "0.5",
+    minEntryDistancePercent: form.get("minEntryDistancePercent") ?? "0",
     stopLossPercent: form.get("stopLossPercent") ?? "",
     stopLossOrderType: form.get("stopLossOrderType") ?? "market",
     takeProfitPercent: form.get("takeProfitPercent") ?? "",

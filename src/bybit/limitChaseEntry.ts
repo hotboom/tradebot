@@ -13,9 +13,7 @@ export interface ChaseEntryResult {
   filledQty: number;
   avgPrice: number;
   lastOrderId: string;
-  /** Лучшая цена нашей стороны стакана на момент самого первого обращения к нему (до первого
-   * сабмита) — то, по чему исполнился бы маркет-ордер вместо чейза. Для постфактумного
-   * сравнения факта (avgPrice) с гипотетическим маркет-входом. */
+  /** First same-side bid/ask, not the opposite-side price a market order would consume. */
   refPrice: number;
 }
 
@@ -41,6 +39,7 @@ export async function chaseLimitEntry(client: BybitClient, params: ChaseEntryPar
   let orderId: string | null = null;
   let restingPrice: number | null = null;
   let currentOrderFilledQty = 0;
+  let currentOrderFilledValue = 0;
   let refPrice = 0;
   let refPriceCaptured = false;
 
@@ -56,6 +55,7 @@ export async function chaseLimitEntry(client: BybitClient, params: ChaseEntryPar
     orderId = await client.submitLimitOrder({ symbol, side, qty: remainingQty, price });
     restingPrice = price;
     currentOrderFilledQty = 0;
+    currentOrderFilledValue = 0;
   }
 
   await submitFresh(qty);
@@ -81,7 +81,9 @@ export async function chaseLimitEntry(client: BybitClient, params: ChaseEntryPar
 
     const deltaQty = state.cumExecQty - currentOrderFilledQty;
     if (deltaQty > 0) {
-      filledValue += deltaQty * state.avgPrice;
+      const cumulativeValue = state.cumExecQty * state.avgPrice;
+      filledValue += cumulativeValue - currentOrderFilledValue;
+      currentOrderFilledValue = cumulativeValue;
       filledQty += deltaQty;
       currentOrderFilledQty = state.cumExecQty;
     }

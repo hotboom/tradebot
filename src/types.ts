@@ -12,6 +12,7 @@ export type OrderSide = "Buy" | "Sell";
 
 export type SignalDecision = "accepted" | "rejected";
 export type SignalRejectReason =
+  | "entry_pending"
   | "invalid_schema"
   | "max_pos_limit"
   | "max_open_positions"
@@ -34,7 +35,7 @@ export interface SignalLogEntry {
   reason: SignalRejectReason | null;
 }
 
-export type OrderStatus = "submitted" | "filled" | "failed";
+export type OrderStatus = "submitted" | "filled" | "failed" | "cancelled" | "skipped";
 
 export type BreakevenStatus = "applied" | "failed";
 
@@ -115,15 +116,23 @@ export interface MarketTpSlConversionLogEntry {
 
 export interface OrderLogEntry {
   ts: number;
+  signalTs?: number;
+  entryOrderType?: "market" | "limit" | "offset_limit";
+  entryOffsetPercent?: number | null;
+  minEntryDistancePercent?: number;
+  previousEntryPrice?: number | null;
+  actualEntryDistancePercent?: number | null;
+  limitPrice?: number | null;
+  orderFillPrice?: number | null;
+  positionAvgPrice?: number | null;
+  entryFilledAt?: number | null;
+  entryOutcome?: string;
   symbol: string;
   side: OrderSide;
   qty: number | null;
   entryPriceRef: number;
-  /** Лучшая цена нашей стороны стакана в момент старта лимитного чейза (best bid для Buy /
-   * best ask для Sell) — то, по чему исполнился бы маркет-ордер вместо чейза. Только для
-   * entryOrderType: "limit"; null для маркет-входа (там незачем платить лишним запросом
-   * к стакану на критическом пути). Для сравнения фактической цены чейза с гипотетическим
-   * маркет-входом постфактум. */
+  /** Initial same-side bid/ask for chase; fetched futures Last for offset; null for market.
+   * This is a reference, not a simulated market execution price. */
   refMarketPrice: number | null;
   sl: number | null;
   slOrderType: "Market" | "Limit" | null;

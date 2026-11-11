@@ -472,7 +472,10 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
       <div class="card">
         ${settingRow("posSize", "posSizeD", textInput("positionSizeUsdt", values.positionSizeUsdt, { rule: "pos", unit: USDT }) + errorSlot("positionSizeUsdt"))}
         ${settingRow("direction", "directionD", segmented("direction", values.direction, [["long", "long"], ["short", "short"], ["both", "both"]]))}
-        ${settingRow("orderType", "orderTypeD", segmented("entryOrderType", values.entryOrderType, [["market", "market"], ["limit", "limit"]]))}
+        ${settingRow("orderType", "orderTypeD", segmented("entryOrderType", values.entryOrderType, [["market", "market"], ["limit", "chaseLimit"], ["offset_limit", "offsetLimit"]]))}
+        <div id="entryOffsetRow"${values.entryOrderType === "offset_limit" ? "" : " hidden"}>
+          ${settingRow("entryOffset", "entryOffsetD", textInput("entryOffsetPercent", values.entryOffsetPercent, { rule: "pos", unit: "%" }) + errorSlot("entryOffsetPercent"))}
+        </div>
         ${settingRow(
           "rate",
           "rateD",
@@ -483,6 +486,7 @@ export function renderSettingsPage(env: LoadedEnv, notice?: Notice, tradingPause
           </div>
           ${errorSlot("maxPositions")}${errorSlot("maxPositionsWindowSec")}`
         )}
+        ${settingRow("minEntryDistance", "minEntryDistanceD", textInput("minEntryDistancePercent", values.minEntryDistancePercent, { rule: "nonneg", unit: "%" }) + errorSlot("minEntryDistancePercent"))}
         ${settingRow("maxOpen", "maxOpenD", textInput("maxOpenPositions", values.maxOpenPositions, { rule: "optint", mode: "numeric", placeholder: "phDisabled" }) + errorSlot("maxOpenPositions"))}
       </div>
     </section>
@@ -675,6 +679,9 @@ const SETTINGS_SCRIPT = `
   }
 
   function syncVisibility() {
+    const showEntryOffset = form.elements.entryOrderType.value === "offset_limit";
+    document.getElementById("entryOffsetRow").hidden = !showEntryOffset;
+    form.elements.entryOffsetPercent.disabled = !showEntryOffset;
     form.querySelectorAll("[data-show-if]").forEach((el) => {
       const toggle = document.getElementById(el.dataset.showIf);
       el.hidden = !(toggle && toggle.checked) && !el.classList.contains("force-show");
@@ -717,6 +724,7 @@ const SETTINGS_SCRIPT = `
   const RULE_ERRORS = { pos: "errPos", nonneg: "errNonneg", int: "errInt", optpos: "errPos", optint: "errInt", port: "errPort", req: "errReq" };
 
   function validate(input) {
+    if (input.disabled) return true;
     const rule = input.dataset.rule;
     const raw = input.value.trim();
     const normalized = rule === "req" ? raw : raw.replace(/[\\s_,]/g, "");

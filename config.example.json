@@ -22,7 +22,9 @@
     "trailingEnabled": false,
     "trailingTriggerPercent": 5,
     "trailingStopPercent": 1,
-    "trailingCheckIntervalSec": 60
+    "trailingCheckIntervalSec": 60,
+    "entryOffsetPercent": 0.5,
+    "minEntryDistancePercent": 2
   },
   "logging": {
     "signalsLogPath": "./logs/signals.log",

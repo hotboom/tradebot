@@ -12,6 +12,8 @@ export type EnvFormValues = {
   serverPort: string;
   positionSizeUsdt: string;
   entryOrderType: string;
+  entryOffsetPercent: string;
+  minEntryDistancePercent: string;
   stopLossPercent: string;
   stopLossOrderType: string;
   takeProfitPercent: string;
@@ -56,7 +58,9 @@ type TradingConfig = {
   };
   trading: {
     positionSizeUsdt: number;
-    entryOrderType: "market" | "limit";
+    entryOrderType: "market" | "limit" | "offset_limit";
+    entryOffsetPercent?: number;
+    minEntryDistancePercent?: number;
     stopLossPercent: number | null;
     stopLossOrderType: "market" | "limit";
     takeProfitPercent: number | null;
@@ -155,9 +159,9 @@ function parseStopLossOrderType(value: string): "market" | "limit" {
   return value;
 }
 
-function parseEntryOrderType(value: string): "market" | "limit" {
-  if (value !== "market" && value !== "limit") {
-    throw new Error("Entry order type must be one of: market, limit");
+function parseEntryOrderType(value: string): "market" | "limit" | "offset_limit" {
+  if (value !== "market" && value !== "limit" && value !== "offset_limit") {
+    throw new Error("Entry order type must be one of: market, limit, offset_limit");
   }
   return value;
 }
@@ -229,6 +233,8 @@ export async function loadEnv(): Promise<LoadedEnv> {
       serverPort: String(config.server.port),
       positionSizeUsdt: String(config.trading.positionSizeUsdt),
       entryOrderType: config.trading.entryOrderType ?? "market",
+      entryOffsetPercent: String(config.trading.entryOffsetPercent ?? 0.5),
+      minEntryDistancePercent: String(config.trading.minEntryDistancePercent ?? 0),
       stopLossPercent: config.trading.stopLossPercent !== null ? String(config.trading.stopLossPercent) : "",
       stopLossOrderType: config.trading.stopLossOrderType ?? "market",
       takeProfitPercent: config.trading.takeProfitPercent !== null ? String(config.trading.takeProfitPercent) : "",
@@ -288,7 +294,14 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
   }
 
   const positionSizeUsdt = parsePositiveNumber(input.positionSizeUsdt, "Position size USDT");
+  const currentConfig = await readConfig();
   const entryOrderType = parseEntryOrderType(input.entryOrderType);
+  const entryOffsetPercent = entryOrderType === "offset_limit"
+    ? parsePositiveNumber(input.entryOffsetPercent, "Entry offset %")
+    : (currentConfig.trading.entryOffsetPercent ?? 0.5);
+  if (entryOffsetPercent >= 100) throw new Error("Entry offset % must be less than 100");
+  const minEntryDistancePercent = parseNonNegativeNumber(input.minEntryDistancePercent, "Minimum entry distance %");
+  if (minEntryDistancePercent >= 100) throw new Error("Minimum entry distance % must be less than 100");
   const stopLossPercent = parseOptionalPositiveNumber(input.stopLossPercent, "Stop loss %");
   const stopLossOrderType = parseStopLossOrderType(input.stopLossOrderType);
   const takeProfitPercent = parseOptionalPositiveNumber(input.takeProfitPercent, "Take profit %");
@@ -334,13 +347,14 @@ export async function saveEnv(input: EnvFormValues): Promise<void> {
     );
   }
 
-  const currentConfig = await readConfig();
   const nextConfig: TradingConfig = {
     server: { port: serverPort, host: serverHost },
     bybit: { testnet: input.bybitTestnet },
     trading: {
       positionSizeUsdt,
       entryOrderType,
+      entryOffsetPercent,
+      minEntryDistancePercent,
       stopLossPercent,
       stopLossOrderType,
       takeProfitPercent,
